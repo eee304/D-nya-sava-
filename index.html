@@ -170,12 +170,12 @@
     display:none; box-shadow:0 4px 14px rgba(0,0,0,.4); }
   #exitBtn.show { display:block; }
   #exitBtn:hover { background:#5a1f1f; }
-  #rankBtn { position:absolute; right:12px; top:232px; z-index:20; background:#1c2c40; color:#ffd35a;
+  #rankBtn { position:absolute; left:12px; top:104px; z-index:20; background:#1c2c40; color:#ffd35a;
     border:1px solid #2f4660; border-radius:10px; padding:9px 13px; font-size:14px; cursor:pointer;
     display:none; box-shadow:0 4px 14px rgba(0,0,0,.4); }
   #rankBtn.show { display:block; }
   #rankBtn:hover { background:#26405c; }
-  #rankPanel { position:absolute; right:12px; top:276px; z-index:19; width:300px; max-height:70vh; overflow-y:auto;
+  #rankPanel { position:absolute; left:12px; top:148px; z-index:19; width:300px; max-height:68vh; overflow-y:auto;
     background:#0e1b2a; border:1px solid #2f4660; border-radius:12px; padding:12px; display:none;
     box-shadow:0 8px 28px rgba(0,0,0,.55); }
   #rankPanel.show { display:block; }
@@ -1411,8 +1411,10 @@ const meshesByCountry = {};   // name -> [meshes]
 function regionMesh(shapeList, color, idx, name, ringXZ){
   const eg=new THREE.ExtrudeGeometry(shapeList,{depth:DEPTH,bevelEnabled:false});
   eg.rotateX(-Math.PI/2); eg.computeVertexNormals();
-  const m=new THREE.Mesh(eg,new THREE.MeshStandardMaterial({color:new THREE.Color(color),roughness:.92,metalness:.02}));
+  const baseCol=new THREE.Color(color);
+  const m=new THREE.Mesh(eg,new THREE.MeshStandardMaterial({color:baseCol.clone(),roughness:.92,metalness:.02}));
   m.userData.i=idx; m.userData.country=name; if(ringXZ) m.userData.ring=ringXZ;
+  m.userData.baseColor=baseCol.clone();   // geographic colour; ownership shows via border, not fill
   m.castShadow=true; m.receiveShadow=true;
   worldGroup.add(m); countryMeshes.push(m);
   if(name){ (meshesByCountry[name]||(meshesByCountry[name]=[])).push(m); }
@@ -1502,14 +1504,36 @@ function pointInRing(x,z,ring){
 // 2014 = modern (world-atlas topojson). 1810 = historical (world_1815 geojson).
 let worldBuilt=false;
 let currentEra='2014';
+// geographic land colour from a country's centroid (lat/lon) — like a physical map
+function geoLandColor(f){
+  let lat=30, lon=0;
+  try{ const c=d3geo.geoCentroid(f); if(c&&isFinite(c[0])){ lon=c[0]; lat=c[1]; } }catch(e){}
+  const a=Math.abs(lat);
+  // small deterministic variation so neighbours differ a touch
+  const jit=(Math.sin(lon*12.9898+lat*78.233)*43758.5453)%1;
+  const j=(jit-Math.floor(jit))*0.08-0.04;
+  let col=new THREE.Color();
+  if(a>=66){                       // polar: snow / ice
+    col.setHSL(0.58, 0.10, 0.82+j);
+  } else if(a>=55){                // sub-polar: pale green-grey tundra
+    col.setHSL(0.28, 0.22, 0.58+j);
+  } else if(a<=12){                // equatorial: lush green
+    col.setHSL(0.33, 0.55, 0.40+j);
+  } else if(a>=18 && a<=33){       // desert belt: sandy
+    col.setHSL(0.12, 0.45, 0.60+j);
+  } else {                         // temperate: yellow-green
+    col.setHSL(0.26, 0.45, 0.50+j);
+  }
+  return col;
+}
+
 function buildWorld(features){
   // features: array of GeoJSON features with properties.name
   projection.fitExtent([[10,10],[W-10,H-10]],{type:'FeatureCollection',features});
   LANDFEATS = features;
   buildLandGrid();
   features.forEach(f=>{ const n=f.properties&&f.properties.name; if(n) featByName[n]=f; });
-  const cols=shuffle(RANDOM);
-  features.forEach((f,idx)=>{ buildCountry(f, cols[idx%cols.length], idx); });
+  features.forEach((f,idx)=>{ buildCountry(f, geoLandColor(f), idx); });
   // remove wide+thin strip artifacts ONLY if they hug the extreme north edge
   const box=new THREE.Box3(); const toRemove=[]; const TOPZ=H/2-12;
   for(const m of countryMeshes){ box.setFromObject(m);
@@ -1520,7 +1544,25 @@ function buildWorld(features){
   ALL_FEATURES = features;
   buildResourceOverlay();
   addDecorations(features);
+  buildAllCountryBorders();   // thin white outline for EVERY country (shows sizes & empty lands)
   worldBuilt=true;
+}
+
+// static thin white outline of every country (built once per map)
+let allBordersGroup=null;
+function buildAllCountryBorders(){
+  if(allBordersGroup){ worldGroup.remove(allBordersGroup);
+    allBordersGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); if(o.material)o.material.dispose(); }); }
+  allBordersGroup=new THREE.Group();
+  const mat=new THREE.LineBasicMaterial({color:0xffffff, transparent:true, opacity:0.55});
+  for(const f of (ALL_FEATURES||[])){
+    const polys=countryPolys(f);
+    for(const poly of polys){ const ring=poly[0];
+      const pts=ring.map(c=> new THREE.Vector3(c[0], DEPTH+0.08, -c[1]));
+      if(pts.length>1){ const geo=new THREE.BufferGeometry().setFromPoints(pts);
+        allBordersGroup.add(new THREE.Line(geo, mat)); } }
+  }
+  worldGroup.add(allBordersGroup);
 }
 
 function normFeatures(features, era){
@@ -2410,7 +2452,7 @@ function chooseEmpire(emp){
   // capital city on the home country (free)
   const cap=capitalXZ(home);
   if(cap && !overlapsObstacle(cap[0],cap[1])){ _spawnFreeCity=true; spawnBuilding('city', cap[0], cap[1], null, true); }
-  document.getElementById('saveBtn').classList.add('show'); document.getElementById('taxbar').classList.add('show'); document.getElementById('exitBtn').classList.add('show');
+  document.getElementById('saveBtn').classList.add('show'); document.getElementById('taxbar').classList.add('show'); document.getElementById('exitBtn').classList.add('show'); document.getElementById('rankBtn').classList.add('show');
   hintEl.textContent=emp.label+' kuruldu! '+present.length+' ülke senin. Başka ülkelere saldırabilirsin.';
 }
 
@@ -2448,7 +2490,7 @@ function finalizeHome2(pers){
   annexCountry(name);   // claim the home country
   const cap=capitalXZ(name);
   if(cap && !overlapsObstacle(cap[0],cap[1])){ _spawnFreeCity=true; spawnBuilding('city', cap[0], cap[1], null, true); }
-  document.getElementById('saveBtn').classList.add('show'); document.getElementById('taxbar').classList.add('show'); document.getElementById('exitBtn').classList.add('show');
+  document.getElementById('saveBtn').classList.add('show'); document.getElementById('taxbar').classList.add('show'); document.getElementById('exitBtn').classList.add('show'); document.getElementById('rankBtn').classList.add('show');
   document.getElementById('rankBtn').classList.add('show');
   refreshTaxHint();
   spawnBots(10);   // 10 AI empires claim their own countries
@@ -2473,16 +2515,15 @@ function annexCountry(name){
   const prev=ownerOf[name];
   if(prev && prev!=='player'){ const b=botById(prev); if(b) b.owned.delete(name); }
   ownerOf[name]='player';
-  const ms=meshesByCountry[name]||[];
-  ms.forEach(m=>m.material.color.copy(OWN_COLOR));
+  colorCountry(name, OWN_COLOR);   // faint blue tint; border shows the real ownership
   redrawBorders();
 }
 // colony: still its own country but bound to you; shown in a paler tint
 function colonizeCountry(name){
   ownedCountries.add(name);
   colonies.add(name);
-  const ms=meshesByCountry[name]||[];
-  ms.forEach(m=>m.material.color.copy(COLONY_COLOR));
+  ownerOf[name]='player';
+  colorCountry(name, COLONY_COLOR);
   // the colony's standing army joins you
   const g=garrisonOf(name);
   if(g>0){ army += g; garrisons[name]=0; updateArmy(); }
@@ -2507,8 +2548,17 @@ function neutralCountries(){
     if(n && !ownedCountries.has(n) && ownerOf[n]===undefined) out.push(n); }
   return out;
 }
-// tint a country's meshes to an owner color
-function colorCountry(name, col){ (meshesByCountry[name]||[]).forEach(m=>m.material.color.copy(col)); }
+// ownership is shown by the coloured border, NOT by the fill (fill stays geographic).
+// we apply only a faint tint of the owner colour so territory is still readable.
+function colorCountry(name, col){
+  (meshesByCountry[name]||[]).forEach(m=>{
+    const base=m.userData.baseColor||m.material.color;
+    m.material.color.copy(base).lerp(col, 0.18);   // 18% owner tint over geography
+  });
+}
+function restoreCountryColor(name){
+  (meshesByCountry[name]||[]).forEach(m=>{ if(m.userData.baseColor) m.material.color.copy(m.userData.baseColor); });
+}
 
 function spawnBots(n){
   bots=[]; for(const k in ownerOf) delete ownerOf[k];
@@ -2700,8 +2750,8 @@ function redrawBorders(){
     borderGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); if(o.material)o.material.dispose(); }); }
   borderGroup=new THREE.Group();
 
-  // one outline group per owner, each in its own colour
-  const groups=[{ names:[...ownedCountries].filter(n=>!partialOwned.has(n)), col:0xffffff }];
+  // one BOLD outline per owner, each in its own colour (sits above the thin white country lines)
+  const groups=[{ names:[...ownedCountries].filter(n=>!partialOwned.has(n)), col:0x37e0ff }];  // player: bright cyan
   for(const b of bots){ if(b.owned.size) groups.push({ names:[...b.owned], col:new THREE.Color(b.colorHex).getHex() }); }
 
   for(const g of groups){
@@ -2710,10 +2760,14 @@ function redrawBorders(){
     const union=outlineOf(g.names);
     for(const poly of union){
       for(const ring of poly){
-        const pts=[];
-        for(const c of ring){ const p=sceneXZ(c[0],c[1]); if(p) pts.push(new THREE.Vector3(p[0], DEPTH+0.05, p[1])); }
-        if(pts.length>1){ const geo=new THREE.BufferGeometry().setFromPoints(pts);
-          borderGroup.add(new THREE.Line(geo, mat)); }
+        const base=[];
+        for(const c of ring){ const p=sceneXZ(c[0],c[1]); if(p) base.push(new THREE.Vector3(p[0], DEPTH+0.22, p[1])); }
+        if(base.length<2) continue;
+        // fake-thick line: a few slightly offset copies
+        for(const [ox,oz] of [[0,0],[0.7,0],[-0.7,0],[0,0.7],[0,-0.7]]){
+          const geo=new THREE.BufferGeometry().setFromPoints(base.map(p=>new THREE.Vector3(p.x+ox,p.y,p.z+oz)));
+          borderGroup.add(new THREE.Line(geo, mat));
+        }
       }
     }
   }
@@ -3369,9 +3423,8 @@ function applyState(st){
   (st.owned||[]).forEach(n=>ownedCountries.add(n));
   (st.colonies||[]).forEach(n=>colonies.add(n));
   if(st.garrisons) for(const k in st.garrisons) garrisons[k]=st.garrisons[k];
-  // recolor owned countries (colonies paler) + borders
-  ownedCountries.forEach(name=>{ const col=colonies.has(name)?COLONY_COLOR:OWN_COLOR;
-    (meshesByCountry[name]||[]).forEach(m=>m.material.color.copy(col)); });
+  // recolor owned countries (colonies paler) + borders — keep geographic fill, tint for ownership
+  ownedCountries.forEach(name=>{ ownerOf[name]='player'; colorCountry(name, colonies.has(name)?COLONY_COLOR:OWN_COLOR); });
   redrawBorders();
   // rebuild buildings (silent: no cost charged, counters incremented inside)
   (st.buildings||[]).forEach(b=>{ if(b.freeCity) _spawnFreeCity=true; spawnBuilding(b.type, b.x, b.z, b.mineral, true); });
@@ -3382,7 +3435,7 @@ function applyState(st){
   if(taxInput) taxInput.value=taxPerPerson; if(typeof refreshTaxHint==='function') refreshTaxHint();
   // show HUD + save button, hide menus
   if(selectedName){ selinfo.classList.add('show'); selinfo.innerHTML=flagFor(selectedName)+' <b>'+selectedName+'</b> — imparatorluğun'; }
-  document.getElementById('saveBtn').classList.add('show'); document.getElementById('taxbar').classList.add('show'); document.getElementById('exitBtn').classList.add('show');
+  document.getElementById('saveBtn').classList.add('show'); document.getElementById('taxbar').classList.add('show'); document.getElementById('exitBtn').classList.add('show'); document.getElementById('rankBtn').classList.add('show');
   mainmenu.classList.remove('open'); lobbyEl.classList.remove('open');
   cpOverlay.classList.remove('open'); document.getElementById('savesModal').classList.remove('open');
   gameStarted=true;
