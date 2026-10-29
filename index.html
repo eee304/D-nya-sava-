@@ -901,7 +901,7 @@ function rebellionReduction(){
 }
 // people's anger as a percentage 0..100. every +5 tax adds 10%. buildings lower it.
 function angerPercent(){
-  let a = (taxPerPerson/5*10)*2*ideoAngerMult() - rebellionReduction() + persAngerAdd();
+  let a = (taxPerPerson/5*10)*ideoAngerMult() - rebellionReduction() + persAngerAdd();
   return Math.max(0, Math.min(100, Math.round(a)));
 }
 // called once for each pay period (collects taxes; upkeep is charged daily elsewhere)
