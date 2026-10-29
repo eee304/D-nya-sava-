@@ -170,6 +170,24 @@
     display:none; box-shadow:0 4px 14px rgba(0,0,0,.4); }
   #exitBtn.show { display:block; }
   #exitBtn:hover { background:#5a1f1f; }
+  #rankBtn { position:absolute; right:12px; top:232px; z-index:20; background:#1c2c40; color:#ffd35a;
+    border:1px solid #2f4660; border-radius:10px; padding:9px 13px; font-size:14px; cursor:pointer;
+    display:none; box-shadow:0 4px 14px rgba(0,0,0,.4); }
+  #rankBtn.show { display:block; }
+  #rankBtn:hover { background:#26405c; }
+  #rankPanel { position:absolute; right:12px; top:276px; z-index:19; width:300px; max-height:70vh; overflow-y:auto;
+    background:#0e1b2a; border:1px solid #2f4660; border-radius:12px; padding:12px; display:none;
+    box-shadow:0 8px 28px rgba(0,0,0,.55); }
+  #rankPanel.show { display:block; }
+  #rankPanel h3 { margin:0 0 10px; font-size:14px; color:#ffd35a; }
+  .rank-row { display:flex; align-items:center; gap:8px; padding:7px 6px; border-radius:8px; margin-bottom:4px;
+    background:#14233a; font-size:12px; }
+  .rank-row.me { outline:2px solid #2e8bff; }
+  .rank-pos { width:18px; text-align:center; font-weight:800; color:#ffd35a; flex:0 0 auto; }
+  .rank-swatch { width:12px; height:12px; border-radius:3px; flex:0 0 auto; }
+  .rank-flag { width:20px; height:15px; border-radius:2px; flex:0 0 auto; object-fit:cover; }
+  .rank-name { flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:700; }
+  .rank-stats { flex:0 0 auto; text-align:right; line-height:1.35; color:#cfe0f0; }
   #savesModal { position:absolute; inset:0; z-index:32; display:none; align-items:center;
     justify-content:center; background:rgba(6,16,28,.92); padding:16px; }
   #savesModal.open { display:flex; }
@@ -237,6 +255,8 @@
     <button id="resBtn">⛏️ Kaynak Haritası</button>
     <button id="saveBtn">💾 Kaydet</button>
     <button id="exitBtn">🏠 Ana Menü</button>
+    <button id="rankBtn">🏆 Sıralama</button>
+    <div id="rankPanel"><h3>🏆 Sıralama (ekonomiye göre)</h3><div id="rankList"></div></div>
     <div id="savesModal">
       <div class="mm-box">
         <h2 class="mm-title">Kaydedilen Oyunlarım</h2>
@@ -1097,6 +1117,12 @@ function exitToMenu(){
   mainmenu.classList.add('open');
 }
 document.getElementById('exitBtn').onclick=exitToMenu;
+document.getElementById('rankBtn').onclick=()=>{
+  rankOpen=!rankOpen;
+  const p=document.getElementById('rankPanel');
+  p.classList.toggle('show', rankOpen);
+  if(rankOpen) renderRanking();
+};
 // legacy no-op (old modal button)
 function resolveRebellion(){}
 updateMoney(); updatePop(); updateArmy(); updateIron();
@@ -1263,7 +1289,8 @@ function loop(){
     const payIndex = Math.floor((Math.floor(gameDays) - payOffset)/30) + 1;
     if(payIndex>lastMonthCounted){
       const times=payIndex-lastMonthCounted; lastMonthCounted=payIndex;
-      for(let i=0;i<times && i<24;i++) onMonthPassed();
+      for(let i=0;i<times && i<24;i++){ onMonthPassed(); botsMonthlyTick(); }
+      if(rankOpen) renderRanking();
     }
     // anger meter: at 100% the people rise up (no randomness)
     updateTaxFace();
@@ -2422,7 +2449,9 @@ function finalizeHome2(pers){
   const cap=capitalXZ(name);
   if(cap && !overlapsObstacle(cap[0],cap[1])){ _spawnFreeCity=true; spawnBuilding('city', cap[0], cap[1], null, true); }
   document.getElementById('saveBtn').classList.add('show'); document.getElementById('taxbar').classList.add('show'); document.getElementById('exitBtn').classList.add('show');
+  document.getElementById('rankBtn').classList.add('show');
   refreshTaxHint();
+  spawnBots(10);   // 10 AI empires claim their own countries
 }
 document.getElementById('ideoSoc').onclick=()=>finalizeHome('socialism');
 document.getElementById('ideoCap').onclick=()=>finalizeHome('capitalism');
@@ -2440,6 +2469,10 @@ function annexCountry(name){
   ownedCountries.add(name);
   partialOwned.delete(name); delete partialCellsByCountry[name];
   colonies.delete(name);
+  // if a bot held this country, take it from them
+  const prev=ownerOf[name];
+  if(prev && prev!=='player'){ const b=botById(prev); if(b) b.owned.delete(name); }
+  ownerOf[name]='player';
   const ms=meshesByCountry[name]||[];
   ms.forEach(m=>m.material.color.copy(OWN_COLOR));
   redrawBorders();
@@ -2455,6 +2488,153 @@ function colonizeCountry(name){
   if(g>0){ army += g; garrisons[name]=0; updateArmy(); }
   redrawBorders();
 }
+
+// ================= BOTS (AI empires) =================
+// Each bot owns a set of countries, grows an economy, and attacks/defends sensibly.
+let bots = [];                 // [{id,name,color,colorHex,owned:Set,money,pop,army}]
+const ownerOf = {};            // country name -> bot id (or 'player'); undefined = neutral
+const BOT_COLORS = [
+  '#e74c3c','#2ecc71','#f1c40f','#9b59b6','#e67e22',
+  '#1abc9c','#ff69b4','#8e44ad','#34c9eb','#c0392b'
+];
+const BOT_NAMES = ['Kızıl Birlik','Yeşil Ordu','Altın Hanedan','Mor İmparatorluk','Turuncu Devlet',
+  'Turkuaz Birliği','Gül Krallığı','Menekşe Cumhuriyeti','Gök Federasyonu','Bordo İttifakı'];
+
+function botById(id){ return bots.find(b=>b.id===id)||null; }
+function neutralCountries(){
+  const out=[];
+  for(const f of (ALL_FEATURES||[])){ const n=f.properties&&f.properties.name;
+    if(n && !ownedCountries.has(n) && ownerOf[n]===undefined) out.push(n); }
+  return out;
+}
+// tint a country's meshes to an owner color
+function colorCountry(name, col){ (meshesByCountry[name]||[]).forEach(m=>m.material.color.copy(col)); }
+
+function spawnBots(n){
+  bots=[]; for(const k in ownerOf) delete ownerOf[k];
+  // mark player's countries as owned by 'player'
+  ownedCountries.forEach(nm=> ownerOf[nm]='player');
+  const pool=neutralCountries();
+  // shuffle pool
+  for(let i=pool.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; [pool[i],pool[j]]=[pool[j],pool[i]]; }
+  for(let i=0;i<n && i<pool.length;i++){
+    const home=pool[i];
+    const col=new THREE.Color(BOT_COLORS[i%BOT_COLORS.length]);
+    const bot={ id:'bot'+i, name:BOT_NAMES[i%BOT_NAMES.length], color:col, colorHex:BOT_COLORS[i%BOT_COLORS.length],
+      owned:new Set([home]), money:800+Math.random()*400, pop:80+Math.random()*60,
+      army:baseArmyFor(home)+Math.round(Math.random()*3000), aggr:0.3+Math.random()*0.5 };
+    ownerOf[home]=bot.id;
+    colorCountry(home, col);
+    bots.push(bot);
+  }
+  redrawBorders();
+}
+
+// how many neutral/other countries border a bot's territory (for sensible expansion)
+function botNeighbors(bot){
+  // candidate targets: any country whose capital is near one of the bot's countries
+  const targets=[];
+  const mine=[...bot.owned].map(n=>capitalXZ(n)).filter(Boolean);
+  if(!mine.length) return targets;
+  for(const f of (ALL_FEATURES||[])){
+    const n=f.properties&&f.properties.name; if(!n) continue;
+    if(bot.owned.has(n)) continue;
+    const cap=capitalXZ(n); if(!cap) continue;
+    let best=Infinity; for(const m of mine){ const d=Math.hypot(cap[0]-m[0],cap[1]-m[1]); if(d<best)best=d; }
+    if(best<140) targets.push({name:n, dist:best});   // only nearby countries
+  }
+  targets.sort((a,b)=>a.dist-b.dist);
+  return targets;
+}
+
+function botDefense(name){
+  // strength defending a country = that country's garrison, or its bot owner's army share
+  const oid=ownerOf[name];
+  if(oid && oid!=='player'){ const b=botById(oid); if(b) return Math.round(b.army/Math.max(1,b.owned.size)) + baseArmyFor(name)*0.4; }
+  if(oid==='player'){ return army; }
+  return garrisonOf(name);
+}
+
+// one monthly step for every bot: grow, then maybe attack a sensible target
+function botsMonthlyTick(){
+  if(!bots.length) return;
+  for(const bot of bots){
+    if(bot.owned.size===0) continue;
+    // ---- economy growth (scales with territory) ----
+    bot.pop += bot.owned.size*8 + 4;
+    bot.money += Math.round(bot.pop*0.6 + bot.owned.size*40);
+    bot.army += Math.round(bot.owned.size*120 + bot.money*0.02);
+    // spend money to reinforce (keeps army believable)
+    if(bot.money>1500){ const buy=Math.round(bot.money*0.3); bot.army+=buy; bot.money-=buy; }
+    // ---- decide whether to attack (only if it makes sense) ----
+    if(Math.random()>bot.aggr) continue;           // not every bot acts every month
+    const targets=botNeighbors(bot);
+    if(!targets.length) continue;
+    // pick the easiest nearby target the bot can clearly beat
+    let chosen=null;
+    for(const t of targets){
+      const def=botDefense(t.name);
+      if(bot.army > def*1.3){ chosen=t; break; }    // sensible: only attack when stronger
+    }
+    if(!chosen) continue;
+    const def=botDefense(chosen.name);
+    // resolve probabilistically (bigger army -> higher chance)
+    const win = Math.random() < (bot.army/(bot.army+def));
+    if(win){ botConquer(bot, chosen.name); bot.army=Math.max(100, bot.army-Math.round(def*0.6)); }
+    else { bot.army=Math.max(50, Math.round(bot.army*0.5)); }
+  }
+}
+
+function botConquer(bot, name){
+  const prev=ownerOf[name];
+  if(prev==='player'){
+    // a bot took one of the player's countries
+    ownedCountries.delete(name); colonies.delete(name);
+  } else if(prev && prev!==bot.id){
+    const other=botById(prev); if(other) other.owned.delete(name);
+  }
+  ownerOf[name]=bot.id; bot.owned.add(name);
+  colorCountry(name, bot.color);
+  redrawBorders();
+  if(prev==='player'){ hintEl.textContent='⚠️ '+bot.name+' senden '+name+' ülkesini aldı!'; }
+}
+// ---- ranking panel (by economy; shows flag, pop, size, army) ----
+let rankOpen=false;
+function empireArea(names){
+  let st=0; for(const n of names){ const f=featByName[n]; if(f){ try{ st+=d3geo.geoArea(f); }catch(e){} } }
+  return Math.round(st*EARTH_KM2_PER_STER);
+}
+function renderRanking(){
+  const list=document.getElementById('rankList'); if(!list) return;
+  const rows=[];
+  // the player
+  rows.push({ me:true, name:(selectedName?('Sen · '+selectedName):'Sen'),
+    flag: selectedName?flagFor(selectedName):'', swatch:'#2e8bff',
+    money:Math.round(money), pop:Math.round(population), size:empireArea([...ownedCountries]), army:Math.round(army),
+    countries:ownedCountries.size });
+  // bots
+  for(const b of bots){
+    const home=[...b.owned][0];
+    rows.push({ me:false, name:b.name, flag: home?flagFor(home):'', swatch:b.colorHex,
+      money:Math.round(b.money), pop:Math.round(b.pop), size:empireArea([...b.owned]), army:Math.round(b.army),
+      countries:b.owned.size });
+  }
+  rows.sort((a,b)=> b.money-a.money);   // rank by economy
+  list.innerHTML='';
+  rows.forEach((r,i)=>{
+    const row=document.createElement('div'); row.className='rank-row'+(r.me?' me':'');
+    const flagHtml = r.flag || '<span style="width:20px;display:inline-block">🏳️</span>';
+    row.innerHTML =
+      '<span class="rank-pos">'+(i+1)+'</span>'+
+      '<span class="rank-swatch" style="background:'+r.swatch+'"></span>'+
+      flagHtml+
+      '<span class="rank-name">'+r.name+'</span>'+
+      '<span class="rank-stats">💰'+r.money.toLocaleString('tr-TR')+' · 🪖'+r.army.toLocaleString('tr-TR')+'<br>'+
+        '👥'+r.pop.toLocaleString('tr-TR')+' · 🗺️'+r.countries+' ülke · '+r.size.toLocaleString('tr-TR')+' km²</span>';
+    list.appendChild(row);
+  });
+}
+// ================= end bots =================
 
 // is a clicked world point inside ANY country we own?
 function inSelected(x,z){
@@ -2475,45 +2655,35 @@ function capitalXZ(name){
   return sceneXZ(c[0], c[1]);
 }
 
-// ---- borders of owned territory (bright thin white outline) ----
+// ---- borders of owned territory, one colour per owner (player + each bot) ----
 let borderGroup=null;
-function redrawBorders(){
-  if(borderGroup){ worldGroup.remove(borderGroup);
-    borderGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); if(o.material)o.material.dispose(); }); }
-  borderGroup=new THREE.Group();
-  const mat=new THREE.LineBasicMaterial({color:0xffffff});
-
-  // collect every owned polygon as lon/lat rings, dropping antimeridian slivers.
-  // Use full-resolution rings so the border follows the true coastline.
-  // Only thin out extremely dense rings (>1500 pts) a little, to keep union responsive.
-  function simplifyRing(r){
-    if(r.length<=2500) return r;
-    const step=Math.ceil(r.length/2500);
-    const out=[]; for(let i=0;i<r.length;i+=step) out.push(r[i]);
-    if(out[out.length-1]!==r[r.length-1]) out.push(r[r.length-1]);
-    return out;
-  }
-  const allPolys=[];   // each: [ [ [lon,lat],... ] , ...holes ]
-  const SNAP=0.1;      // snap grid (deg)
-  const BUF=0.08;      // tiny buffer: merges neighbours but hugs the coastline (no floating over sea)
-  const snap=v=>Math.round(v/SNAP)*SNAP;
-  ownedCountries.forEach(name=>{
-    if(partialOwned.has(name)) return;   // partial countries handled below (cell outlines)
+function simplifyRingB(r){
+  if(r.length<=2500) return r;
+  const step=Math.ceil(r.length/2500);
+  const out=[]; for(let i=0;i<r.length;i+=step) out.push(r[i]);
+  if(out[out.length-1]!==r[r.length-1]) out.push(r[r.length-1]);
+  return out;
+}
+// build the merged outline of a set of country names, as lon/lat polygons
+function outlineOf(names){
+  const SNAP=0.1, BUF=0.08; const snap=v=>Math.round(v/SNAP)*SNAP;
+  const allPolys=[];
+  names.forEach(name=>{
+    if(partialOwned.has(name)) return;
     const f=featByName[name]; if(!f||!f.geometry) return;
     const raw = f.geometry.type==='Polygon'?[f.geometry.coordinates]
               : f.geometry.type==='MultiPolygon'?f.geometry.coordinates:[];
     for(const rings of raw){
       let lonlat=rings[0]||[];
       let fe=false,fw=false; for(const c of lonlat){ if(c[0]>150)fe=true; if(c[0]<-150)fw=true; }
-      if(fe&&fw){ lonlat=lonlat.filter(c=> c[0]>=-150); }   // drop the across-dateline sliver
+      if(fe&&fw){ lonlat=lonlat.filter(c=> c[0]>=-150); }
       if(lonlat.length<4) continue;
-      const simp=simplifyRing(lonlat);
-      // centroid for outward buffering
+      const simp=simplifyRingB(lonlat);
       let cx=0,cy=0; for(const c of simp){ cx+=c[0]; cy+=c[1]; } cx/=simp.length; cy/=simp.length;
       let ring=[]; let last=null;
       for(const c of simp){
         const dx=c[0]-cx, dy=c[1]-cy; const d=Math.hypot(dx,dy)||1;
-        const p=[snap(c[0]+dx/d*BUF), snap(c[1]+dy/d*BUF)];   // push outward, then snap
+        const p=[snap(c[0]+dx/d*BUF), snap(c[1]+dy/d*BUF)];
         if(!last || p[0]!==last[0] || p[1]!==last[1]){ ring.push(p); last=p; }
       }
       if(ring.length<4) continue;
@@ -2521,27 +2691,36 @@ function redrawBorders(){
       allPolys.push([ring]);
     }
   });
+  if(!allPolys.length) return [];
+  try{ return allPolys.reduce((acc,poly)=> acc ? polygonClipping.union(acc, [poly]) : [poly], null) || []; }
+  catch(e){ return []; }
+}
+function redrawBorders(){
+  if(borderGroup){ worldGroup.remove(borderGroup);
+    borderGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); if(o.material)o.material.dispose(); }); }
+  borderGroup=new THREE.Group();
 
-  // helper: draw one clean white line for a ring
-  function addLine(pts){
-    const geo=new THREE.BufferGeometry().setFromPoints(pts);
-    borderGroup.add(new THREE.Line(geo, mat));
-  }
+  // one outline group per owner, each in its own colour
+  const groups=[{ names:[...ownedCountries].filter(n=>!partialOwned.has(n)), col:0xffffff }];
+  for(const b of bots){ if(b.owned.size) groups.push({ names:[...b.owned], col:new THREE.Color(b.colorHex).getHex() }); }
 
-  // union full-owned country polygons (in lon/lat) -> single outer empire outline
-  if(allPolys.length){
-    let union=[];
-    try{
-      union = allPolys.reduce((acc,poly)=> acc ? polygonClipping.union(acc, [poly]) : [poly], null) || [];
-    }catch(e){ union=[]; }
+  for(const g of groups){
+    if(!g.names.length) continue;
+    const mat=new THREE.LineBasicMaterial({color:g.col});
+    const union=outlineOf(g.names);
     for(const poly of union){
       for(const ring of poly){
         const pts=[];
         for(const c of ring){ const p=sceneXZ(c[0],c[1]); if(p) pts.push(new THREE.Vector3(p[0], DEPTH+0.05, p[1])); }
-        if(pts.length>1) addLine(pts);
+        if(pts.length>1){ const geo=new THREE.BufferGeometry().setFromPoints(pts);
+          borderGroup.add(new THREE.Line(geo, mat)); }
       }
     }
   }
+
+  const mat=new THREE.LineBasicMaterial({color:0xffffff});
+  function addLine(pts){ const geo=new THREE.BufferGeometry().setFromPoints(pts);
+    borderGroup.add(new THREE.Line(geo, mat)); }
 
   // partial countries: outline ONLY the taken cells (their XZ rings are already scene coords)
   partialOwned.forEach(name=>{
@@ -3173,6 +3352,9 @@ function clearWorldObjects(){
   colonies.clear();
   partialOwned.clear(); for(const k in partialCellsByCountry) delete partialCellsByCountry[k];
   for(const k in garrisons) delete garrisons[k];
+  bots=[]; for(const k in ownerOf) delete ownerOf[k];
+  const rb2=document.getElementById('rankBtn'); if(rb2) rb2.classList.remove('show');
+  const rp2=document.getElementById('rankPanel'); if(rp2) rp2.classList.remove('show'); rankOpen=false;
 }
 function applyState(st){
   clearWorldObjects();
