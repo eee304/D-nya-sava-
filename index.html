@@ -1289,12 +1289,15 @@ function loop(){
     const payIndex = Math.floor((Math.floor(gameDays) - payOffset)/30) + 1;
     if(payIndex>lastMonthCounted){
       const times=payIndex-lastMonthCounted; lastMonthCounted=payIndex;
-      for(let i=0;i<times && i<24;i++){ onMonthPassed(); botsMonthlyTick(); }
+      for(let i=0;i<times && i<24;i++){ onMonthPassed(); if(!MP||isHost) botsMonthlyTick(); }
+      if(!MP||isHost) hostBroadcastWorld();
       if(rankOpen) renderRanking();
     }
     // anger meter: at 100% the people rise up (no randomness)
     updateTaxFace();
     if(!rebellionActive && angerPercent()>=100) startRebellion();
+    // host keeps joiners in sync with the shared world
+    if(MP && isHost){ _mpSyncT+=dt; if(_mpSyncT>=1.5){ _mpSyncT=0; hostBroadcastWorld(); } }
   }
   // population grows faster with each city/town built (base 2/sec + bonuses)
   const popRate = (2 + cityCount*2 + townCount*1) * 0.4;   // slower population growth
@@ -1337,6 +1340,7 @@ function loop(){
   renderer.render(scene,camera);
 }
 let _oceanT=0, _oceanSkip=0;
+let _mpSyncT=0;
 
 // (render loop is started at the very end, after all declarations exist)
 
@@ -2487,13 +2491,14 @@ function finalizeHome2(pers){
   const persLabel = pers==='peaceful'?'🕊️ Barışçıl':pers==='warlike'?'🗡️ Savaşçı':'🛠️ Çalışkan';
   selinfo.innerHTML=flagFor(name)+' <b>'+name+'</b> — '+ideoLabel+' · '+persLabel;
   hintEl.textContent=name+' senin ülken ('+ideoLabel+', '+persLabel+'). Başka bir ülkeye tıklayıp işgal edebilirsin.';
-  annexCountry(name);   // claim the home country
+  annexCountry(name, true);   // claim the home country (isHome)
   const cap=capitalXZ(name);
   if(cap && !overlapsObstacle(cap[0],cap[1])){ _spawnFreeCity=true; spawnBuilding('city', cap[0], cap[1], null, true); }
   document.getElementById('saveBtn').classList.add('show'); document.getElementById('taxbar').classList.add('show'); document.getElementById('exitBtn').classList.add('show'); document.getElementById('rankBtn').classList.add('show');
   document.getElementById('rankBtn').classList.add('show');
   refreshTaxHint();
-  spawnBots(10);   // 10 AI empires claim their own countries
+  // bots are authoritative on the host (or in solo); joiners receive them via world sync
+  if(!MP || isHost){ spawnBots(10); if(MP) hostBroadcastWorld(); }
 }
 document.getElementById('ideoSoc').onclick=()=>finalizeHome('socialism');
 document.getElementById('ideoCap').onclick=()=>finalizeHome('capitalism');
@@ -2507,16 +2512,22 @@ const COLONY_COLOR = new THREE.Color('#7fb0e6');  // paler than OWN_COLOR
 const colonies = new Set();
 const partialOwned = new Set();              // countries owned only partially (region-pick)
 const partialCellsByCountry = {};            // name -> [taken cell meshes]
-function annexCountry(name){
+function annexCountry(name, isHome){
   ownedCountries.add(name);
   partialOwned.delete(name); delete partialCellsByCountry[name];
   colonies.delete(name);
-  // if a bot held this country, take it from them
+  // networked joiner: ask the host to assign it; the authoritative world state comes back
+  if(MP && !isHost){
+    try{ hostConn.send(isHome? {t:'pickHome', id:playerId, name:playerName, home:name}
+                             : {t:'conquer', id:playerId, name:name}); }catch(e){}
+  }
+  // if a bot/other held this country, take it from them (host + solo)
   const prev=ownerOf[name];
-  if(prev && prev!=='player'){ const b=botById(prev); if(b) b.owned.delete(name); }
-  ownerOf[name]='player';
-  colorCountry(name, OWN_COLOR);   // faint blue tint; border shows the real ownership
+  if(prev && prev!=='player' && prev!==playerId){ const b=botById(prev); if(b) b.owned.delete(name); }
+  ownerOf[name]= MP? playerId : 'player';
+  colorCountry(name, MP? new THREE.Color(playerColorHex(playerId)) : OWN_COLOR);
   redrawBorders();
+  if(MP && isHost) hostBroadcastWorld();
 }
 // colony: still its own country but bound to you; shown in a paler tint
 function colonizeCountry(name){
@@ -3230,6 +3241,59 @@ const hostConns=[];                              // host's connections to joiner
 let roster={};                                   // playerId -> {name, ready}
 const CODE_PREFIX='MBR-';                         // namespace to avoid id clashes on public PeerServer
 
+// ========== shared-world multiplayer ==========
+let MP=false;                                    // are we in a networked game?
+const PLAYER_COLORS=['#2e8bff','#ff5a3c','#3ddc84','#ffd23f','#b06bff'];
+const humanPlayers={};                           // pid -> {name, color, home, owned:[...]}
+function playerColorHex(pid){
+  const p=humanPlayers[pid]; if(p&&p.color) return p.color;
+  const ids=Object.keys(humanPlayers).sort(); const i=ids.indexOf(pid);
+  return PLAYER_COLORS[(i<0?0:i)%PLAYER_COLORS.length];
+}
+// paint the whole shared world from a state object {owners:{country:ownerId}, players:{pid:{name,home}}, bots:[{id,name,colorHex,owned:[]}]}
+function applyWorldState(st){
+  if(!st) return;
+  // reset ownership visuals
+  for(const k in ownerOf) delete ownerOf[k];
+  ownedCountries.clear();
+  // rebuild humans
+  for(const pid in (st.players||{})){ humanPlayers[pid]=Object.assign(humanPlayers[pid]||{}, st.players[pid]); }
+  // rebuild bots (visual only on joiners)
+  if(st.bots){
+    bots = st.bots.map(b=>({ id:b.id, name:b.name, color:new THREE.Color(b.colorHex), colorHex:b.colorHex,
+      owned:new Set(b.owned||[]), money:b.money||0, pop:b.pop||0, army:b.army||0, aggr:0.4 }));
+  }
+  // apply owners
+  const owners=st.owners||{};
+  for(const name in owners){
+    const oid=owners[name]; ownerOf[name]=oid;
+    if(oid===playerId) ownedCountries.add(name);
+  }
+  // recolor every owned/tinted country
+  restoreAllCountryColors();
+  for(const name in owners){
+    const oid=owners[name];
+    if(oid&&oid.startsWith&&oid.startsWith('bot')){ const b=botById(oid); if(b) colorCountry(name,b.color); }
+    else { colorCountry(name, new THREE.Color(playerColorHex(oid))); }
+  }
+  redrawBorders();
+  if(rankOpen) renderRanking();
+}
+function restoreAllCountryColors(){
+  for(const name in meshesByCountry) restoreCountryColor(name);
+}
+// host: assemble the full world state to broadcast
+function buildWorldState(){
+  const owners={};
+  for(const name in ownerOf){ owners[name]=ownerOf[name]; }
+  const players={};
+  for(const pid in humanPlayers){ const p=humanPlayers[pid]; players[pid]={name:p.name,home:p.home,color:p.color}; }
+  const botsOut=bots.map(b=>({id:b.id,name:b.name,colorHex:b.colorHex,owned:[...b.owned],money:Math.round(b.money),pop:Math.round(b.pop),army:Math.round(b.army)}));
+  return {t:'world', owners, players, bots:botsOut};
+}
+function hostBroadcastWorld(){ if(isHost && MP){ hostBroadcast(buildWorldState()); } }
+// ========== end shared-world ==========
+
 function code6(){ let s=''; for(let i=0;i<6;i++) s+=Math.floor(Math.random()*10); return s; }
 function setLobbyStatus(t){ const e=document.getElementById('lbStatus'); if(e) e.textContent=t||''; }
 
@@ -3259,8 +3323,11 @@ function hostSync(){
   const ids=Object.keys(roster);
   const allReady = ids.length>0 && ids.every(id=>roster[id].ready);
   if(allReady && !gameStarted){
-    hostBroadcast({t:'start'});
-    gameStarted=true; startCountrySelection();
+    // assign a colour to every human player
+    const sorted=ids.slice().sort();
+    sorted.forEach((pid,i)=>{ humanPlayers[pid]={ name:roster[pid].name, color:PLAYER_COLORS[i%PLAYER_COLORS.length], home:null }; });
+    hostBroadcast({t:'start', players:humanPlayers});
+    MP=true; gameStarted=true; startCountrySelection();
   }
 }
 
@@ -3294,6 +3361,23 @@ function makeTeam(){
         roster[d.id]={ name:d.name||'Oyuncu', ready:false }; conn._pid=d.id; hostSync();
       } else if(d&&d.t==='ready'){
         if(roster[d.id]) roster[d.id].ready=!!d.ready; hostSync();
+      } else if(d&&d.t==='pickHome'){
+        // a joiner chose their home country: grant it only if still free
+        if(ownerOf[d.home]===undefined){
+          ownerOf[d.home]=d.id; if(humanPlayers[d.id]) humanPlayers[d.id].home=d.home;
+          colorCountry(d.home, new THREE.Color(playerColorHex(d.id)));
+          redrawBorders(); hostBroadcastWorld();
+        } else { try{ conn.send({t:'homeTaken', home:d.home}); }catch(e){} hostBroadcastWorld(); }
+      } else if(d&&d.t==='conquer'){
+        // a joiner conquered a country: assign it to them if they can (host is authoritative)
+        const nm=d.name;
+        if(ownerOf[nm]!==d.id){
+          const prev=ownerOf[nm];
+          if(prev&&prev.startsWith&&prev.startsWith('bot')){ const b=botById(prev); if(b) b.owned.delete(nm); }
+          ownerOf[nm]=d.id;
+          colorCountry(nm, new THREE.Color(playerColorHex(d.id)));
+          redrawBorders(); hostBroadcastWorld();
+        }
       }
     });
     conn.on('close', ()=>{ const i=hostConns.indexOf(conn); if(i>=0)hostConns.splice(i,1);
@@ -3330,7 +3414,9 @@ function joinTeam(code){
     });
     hostConn.on('data', d=>{
       if(d&&d.t==='roster'){ roster=d.roster||{}; renderRoster(); }
-      else if(d&&d.t==='start'){ if(!gameStarted){ gameStarted=true; startCountrySelection(); } }
+      else if(d&&d.t==='start'){ if(!gameStarted){ if(d.players){ for(const pid in d.players) humanPlayers[pid]=d.players[pid]; } MP=true; gameStarted=true; startCountrySelection(); } }
+      else if(d&&d.t==='world'){ applyWorldState(d); }
+      else if(d&&d.t==='homeTaken'){ hintEl.textContent='O ülke başkası tarafından seçildi — başka bir ülke seç.'; pickingHome=true; }
       else if(d&&d.t==='full'){ setLobbyStatus('Lobi dolu (5/5).'); }
     });
     hostConn.on('close', ()=>{ setLobbyStatus('Bağlantı koptu (host ayrıldı).'); });
@@ -3407,6 +3493,7 @@ function clearWorldObjects(){
   partialOwned.clear(); for(const k in partialCellsByCountry) delete partialCellsByCountry[k];
   for(const k in garrisons) delete garrisons[k];
   bots=[]; for(const k in ownerOf) delete ownerOf[k];
+  MP=false; _mpSyncT=0; for(const k in humanPlayers) delete humanPlayers[k];
   const rb2=document.getElementById('rankBtn'); if(rb2) rb2.classList.remove('show');
   const rp2=document.getElementById('rankPanel'); if(rp2) rp2.classList.remove('show'); rankOpen=false;
 }
