@@ -1,0 +1,30 @@
+{
+  "name": "map-battle-royale",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "smoke": "node scripts/smoke.mjs",
+    "lint": "eslint src",
+    "battle": "node scripts/battle.mjs",
+    "regionbuild": "node scripts/regionbuild.mjs",
+    "provinces": "node scripts/provinces.mjs"
+  },
+  "dependencies": {
+    "d3-delaunay": "^6.0.4",
+    "d3-geo": "^3.1.1",
+    "peerjs": "^1.5.4",
+    "polygon-clipping": "^0.15.7",
+    "three": "^0.160.0",
+    "topojson-client": "^3.1.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "globals": "^15.15.0",
+    "puppeteer-core": "^23.11.1",
+    "vite": "^5.4.21"
+  }
+}

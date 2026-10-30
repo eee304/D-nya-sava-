@@ -1,0 +1,11 @@
+# Apache / shared hosting: correct types for the game's files, and always serve the folder with a trailing slash
+DirectorySlash On
+DirectoryIndex index.html
+AddType application/javascript .js .mjs
+AddType text/css .css
+AddType application/json .json
+AddType application/geo+json .geojson
+AddType model/gltf-binary .glb
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE application/javascript text/css application/json application/geo+json text/html
+</IfModule>

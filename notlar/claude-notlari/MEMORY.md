@@ -1,0 +1,3 @@
+- [Türkçe konuş](user-language-turkish.md) — always reply to the user in Turkish
+- [Map Battle Royale decisions](map-battle-royale-decisions.md) — name, two zoom layers, code models first, keep multiplayer
+- [Self-critique visuals](self-critique-visuals.md) — critique close-ups myself and fix crude visuals before reporting
