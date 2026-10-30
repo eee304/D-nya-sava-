@@ -1,7 +1,7 @@
 # Rigged humans for Map Battle Royale: 1810 / 2014 soldiers and townsfolk.
 # One smooth metaball body, accessories skinned rigidly to bones, colours in a vertex-colour layer.
 # Marker colours are replaced in the game: magenta = team / shirt, cyan = trousers (townsfolk), yellow = skin (townsfolk).
-# Variants: <kind>_<era>[_<culture>][_f]  culture: eu (default) | isl (Ottoman / Islamic world) | ea (East Asia) | af (Africa)
+# Variants: <kind>_<era>[_<culture>][_f]  kind: soldier | civ | worker (a townsman with an axe and a chop clip)  culture: eu (default) | isl (Ottoman / Islamic world) | ea (East Asia) | af (Africa)
 #   Blender -b --factory-startup -P blender/human.py -- public/models
 import bpy, math, sys, os
 from mathutils import Vector
@@ -24,8 +24,12 @@ def paint(obj, colfn):
 def solid(obj, hexs): paint(obj, lambda co: hexs)
 
 def build(variant):
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    bits = variant.split('_'); era = bits[1]; soldier = bits[0] == 'soldier'
+    if bpy.app.background: bpy.ops.wm.read_factory_settings(use_empty=True)
+    else:   # inside an open Blender (e.g. driven over MCP): empty the scene without resetting add-ons and preferences
+        if bpy.context.object and bpy.context.object.mode != 'OBJECT': bpy.ops.object.mode_set(mode='OBJECT')
+        for coll in (bpy.data.objects, bpy.data.meshes, bpy.data.armatures, bpy.data.actions, bpy.data.materials, bpy.data.metaballs, bpy.data.cameras, bpy.data.lights):
+            for d in list(coll): coll.remove(d)
+    bits = variant.split('_'); era = bits[1]; soldier = bits[0] == 'soldier'; worker = bits[0] == 'worker'
     fem = bits[-1] == 'f'; cul = bits[2] if len(bits) > 2 and bits[2] != 'f' else 'eu'
     # ---- body (character faces -Y, right side is -X, height 1.0)
     mb = bpy.data.metaballs.new('mb'); mb.resolution = .022; mb.render_resolution = .022
@@ -189,6 +193,13 @@ def build(variant):
         skirt(.5, .27, .1, .16, PANTS)
     else:
         sph(.1, (0, .01, .915), '#3a2a20', 'head', (1, 1.02, .8))               # hair
+    if worker:   # felling axe held in the right fist: the haft hangs along the leg while walking and becomes the swing's lever
+        hx, hy = -A2 - .004, -.018
+        cyl(.0085, .36, (hx, hy, .3), '#8a6a44', 'hand_R', v=8)                       # ash haft, from the fist down
+        cyl(.011, .02, (hx, hy, .125), '#6b5236', 'hand_R', v=8)                      # swelled knob at the end
+        box((.022, .075, .04), (hx, hy - .028, .135), '#7c8288', 'hand_R')            # iron head, blade forward
+        box((.024, .012, .052), (hx, hy - .068, .135), '#c9ced3', 'hand_R')           # bright cutting edge
+        box((.06, .014, .05), (0, .09, .52), '#5a4330', 'hips')                        # leather pouch at the back
     # ---- armature
     bpy.ops.object.armature_add(location=(0, 0, 0)); arm = bpy.context.active_object; arm.name = variant + '_rig'
     bpy.ops.object.mode_set(mode='EDIT'); eb = arm.data.edit_bones; eb.remove(eb[0])
@@ -270,6 +281,18 @@ def build(variant):
             P('thigh_R').rotation_euler = (.25, 0, 0); P('shin_R').rotation_euler = (1.55, 0, 0); P('foot_R').rotation_euler = (-.6, 0, 0)
             aimpose(rec)
         action('march', 24, march); action('run', 14, run); action('aim', 48, aim); action('kneel', 48, kneel); action('idle', 48, idle)
+    elif worker:
+        def chop(t):   # two-handed overhead stroke: slow wind-up, fast strike into the trunk, short recovery
+            sm = lambda k: k * k * (3 - 2 * k)
+            if t < .5: e = sm(t / .5); a = -.75 + (-2.75 + .75) * e; w = .55 * e; sp = .1 * e
+            elif t < .62: e = ((t - .5) / .12) ** 2; a = -2.75 + (2.75 - .55) * e; w = .55 - .8 * e; sp = .1 - .42 * e
+            else: e = sm((t - .62) / .38); a = -.55 - .2 * e; w = -.25 + .25 * e; sp = -.32 + .32 * e
+            P('thigh_L').rotation_euler = (-.32, 0, .04); P('shin_L').rotation_euler = (.3, 0, 0)
+            P('thigh_R').rotation_euler = (.22, 0, -.04); P('shin_R').rotation_euler = (.18, 0, 0); P('foot_R').rotation_euler = (-.1, 0, 0)
+            P('hips').location = (0, -.012 - .01 * max(0, -sp), 0); P('spine').rotation_euler = (sp, -.12, 0); P('neck').rotation_euler = (-sp * .6, .1, 0)
+            P('upper_R').rotation_euler = (a, 0, -.12); P('fore_R').rotation_euler = (-.35 - .2 * (1 - abs(w)), 0, 0); P('hand_R').rotation_euler = (w, 0, 0)
+            P('upper_L').rotation_euler = (a + .15, 0, .38); P('fore_L').rotation_euler = (-.75, 0, 0)   # left hand closes on the haft below the right
+        action('walk', 24, lambda t: walk(t, .4, .18)); action('idle', 48, idle); action('chop', 30, chop)
     else:
         action('walk', 24, (lambda t: walk(t, .36, .2)) if fw else walk); action('idle', 48, idle)
     # ---- export
@@ -280,7 +303,8 @@ def build(variant):
 
 ONLY = sys.argv[sys.argv.index('--') + 2:] if len(sys.argv) > sys.argv.index('--') + 2 else None
 VARIANTS = ['soldier_1810', 'soldier_1810_isl', 'soldier_1810_ea', 'soldier_2014', 'civ_1810', 'civ_1810_f', 'civ_1810_isl', 'civ_1810_isl_f',
-            'civ_1810_ea', 'civ_1810_ea_f', 'civ_1810_af', 'civ_1810_af_f', 'civ_2014', 'civ_2014_f']
+            'civ_1810_ea', 'civ_1810_ea_f', 'civ_1810_af', 'civ_1810_af_f', 'civ_2014', 'civ_2014_f',
+            'worker_1810', 'worker_1810_isl', 'worker_1810_ea', 'worker_1810_af', 'worker_2014']
 for v in VARIANTS:
     if not ONLY or v in ONLY: build(v)
 
