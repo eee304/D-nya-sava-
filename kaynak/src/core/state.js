@@ -8,6 +8,7 @@ export const S = {
   popCap: 100,             // population limit; +500 per city, +250 per town
   iron: 0,                 // mined from iron deposits
   bread: 0,                // from fields
+  wood: 0,                 // felled in forests (1810)
   taxPerPerson: 2,         // money collected per person per month
   _upkeepDebt: 0,          // accumulates fractional daily upkeep
 
@@ -44,6 +45,8 @@ export const S = {
   goods: { fish: 0, livestock: 0, oil: 0, tech: 0 },   // trade goods (bread and iron live in S.bread / S.iron)
   fed: false,              // was the population fed with fish/meat last month?
   spec: {},                // provinceId -> specialisation ('tarim' | 'sanayi' | 'askeri' | 'ticaret')
+  settle: {},              // provinceId -> settlement level 0 village, 1 town, 2 city, 3 big city
+  cleared: {},             // provinceId -> felled tree positions (region coords, 'x,z' keys)
   troops: {},              // provinceId -> our soldiers stationed there (S.army = total incl. troops on the move)
   currentEra: '2014',
 };

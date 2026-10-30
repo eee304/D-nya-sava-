@@ -18,10 +18,11 @@
         <div class="r"><i>Nüfus</i><b id="popVal">0</b></div>
         <div class="r"><i>Ordu</i><b id="armyVal">0</b></div>
         <div class="r"><i>Ekmek</i><b id="breadVal">0</b></div>
+        <div class="r" id="woodChip"><i>Odun</i><b id="woodVal">0</b></div>
         <div class="r"><i>Demir</i><b id="ironVal">0</b></div>
         <div class="r"><i>Gıda</i><b id="foodVal">0</b><em id="foodState"></em></div>
         <div class="r"><i id="oilLbl">Petrol</i><b id="oilVal">0</b></div>
-        <div class="r"><i id="techLbl">Teknoloji</i><b id="techVal">0</b><em id="techBonus"></em></div>
+        <div class="r" id="techChip"><i id="techLbl">Teknoloji</i><b id="techVal">0</b><em id="techBonus"></em></div>
         <div class="r" id="angerChip"><i>Halk öfkesi</i><b id="angerVal">%0</b></div>
       </div>
       <div id="calendar"><span id="skyIcon" title="Günün saati takvimle birlikte değişir">☀️</span><span id="calDate">1 Ocak 2014</span>
@@ -44,6 +45,7 @@
       <div class="ctx-kv"><span>Garnizon</span><b id="pvTroops">0</b><span>Binalar</span><b id="pvBuild">yok</b><span>Vergi katkısı</span><b id="pvTax">+%0</b></div>
       <div id="pvMove"><label for="pvMoveN">Taşınacak asker: <b id="pvMoveLbl">0</b></label><input id="pvMoveN" type="range" min="0" max="0" step="100" value="0"><button id="pvMoveBtn" type="button">🪖 Asker taşı → hedef bölgeye tıkla</button></div>
       <div id="pvSpec"><div class="pv-spec-row"><button type="button" data-spec="tarim">🌾 Tarım</button><button type="button" data-spec="sanayi">⚙️ Sanayi</button><button type="button" data-spec="askeri">🪖 Askeri</button><button type="button" data-spec="ticaret">💰 Ticaret</button></div><small id="pvSpecDesc"></small></div>
+      <button id="pvUpgrade" class="upg" type="button"></button>
       <div class="pv-btns"><button id="pvRecruit" type="button">Asker al</button><button id="pvBuildHere" type="button">İnşa et</button><button id="pvRegion" type="button">🔍 Bölgeye in</button></div>
     </div>
     <div id="tradePanel">
@@ -54,6 +56,7 @@
       <div id="trOffers"></div>
     </div>
     <div id="garrisonLabels"></div>
+    <div id="woodPop"><div class="wp-head"><b id="woodPopTitle"></b><button id="woodPopClose" type="button" title="Kapat">✕</button></div><button id="woodPopBtn" type="button"></button><small>Köylüler 5 saniye çalışır; ağaçlar devrilir, yerine inşaat yapılabilir.</small></div>
     <div id="warAlerts"></div>
     <div id="actionbar">
       <button id="buildBtn" class="act " type="button" title="İnşa"><svg viewBox="0 0 24 24"><path d="M4 20h16M6 20V11l6-5 6 5v9M10 20v-5h4v5"/></svg><span>İnşa</span><kbd>B</kbd></button>
@@ -88,7 +91,7 @@
     <div id="regionLabels" style="display:none"></div>
     <div id="regionHud">
       <div class="rh-title"><b id="rhName"></b><span id="rhSub"></span></div>
-      <div class="rh-btns"><button id="rhManage" type="button">⚙️ Bölge yönetimi</button><button id="rhBack">🗺️ Dünya haritası</button></div>
+      <div class="rh-btns"><button id="rhUpgrade" class="upg" type="button"></button><button id="rhManage" type="button">⚙️ Bölge yönetimi</button><button id="rhBack">🗺️ Dünya haritası</button></div>
       <div class="rh-hint">Sol tık sürükle: kaydır · Sağ tık: döndür · Tekerlek: yakınlaş · Sonuna kadar uzaklaş: dünya haritası</div>
     </div>
     <div id="pickPreview"><img id="ppFlag" alt=""><span id="ppGlobe">🌐</span><b id="ppName"></b><span id="ppInfo"></span><span id="ppIdent"></span><small id="ppHint">Seçmek için tıkla</small></div>
@@ -242,8 +245,6 @@
       <button id="regionConfirm">Onayla</button>
     </div>
     <div id="buildpanel">
-      <button class="bopt" data-b="city">🏙️ Şehir (5000💰+500🍞)<span class="binfo">Nüfus +500 (≈+1000 vergi/ay) · Gider: -20/gün</span></button>
-      <button class="bopt" data-b="town">🏘️ Kasaba (2500💰+250🍞)<span class="binfo">Nüfus +250 (≈+500 vergi/ay) · Gider: -7/gün</span></button>
       <button class="bopt" data-b="base">🪖 Askeri Üs (5000)<span class="binfo">Ordu kur · Gider: -8/gün</span></button>
       <button class="bopt" data-b="mine">⛏️ Maden Ocağı (1000)<span class="binfo">Madeni çıkarır · Gider yok</span></button>
       <button class="bopt" data-b="bank">🏦 Banka (3000)<span class="binfo">Para limiti +7000 · Gider yok</span></button>
@@ -271,7 +272,7 @@
     </div>
     <div id="shipmenu">
       <div class="sm-title">🚢 Tersane</div>
-      <div class="sm-row"><span>Gemi</span><span class="sm-price">3000 💰</span></div>
+      <div class="sm-row"><span>Gemi</span><span class="sm-price" id="shipPrice">3000 💰</span></div>
       <button id="buildShip">Gemi Üret</button>
       <button id="closeShip" class="sm-close">Kapat</button>
     </div>
@@ -291,14 +292,14 @@
     </div>
     <div id="tankmenu">
       <div class="sm-title">🏭 Garaj — Tank Üret</div>
-      <div class="sm-row"><span>Tank başına</span><span>10 👥 · 1500 💰 · 20 ⛓️</span></div>
+      <div class="sm-row"><span id="tankPerLbl">Tank başına</span><span id="tankPer">10 👥 · 1500 💰 · 20 ⛓️</span></div>
       <div style="display:flex;align-items:center;gap:8px;justify-content:center;">
         <button id="tankMinus" class="am-step">−</button>
         <input id="tankQty" type="number" min="1" step="1" value="1">
         <button id="tankPlus" class="am-step">+</button>
       </div>
-      <div class="sm-row"><span>Toplam</span><span class="sm-price"><span id="tankCostP">10</span>👥 <span id="tankCostM">1500</span>💰 <span id="tankCostI">20</span>⛓️</span></div>
-      <div class="sm-row" style="font-size:12px;opacity:.8"><span>Her tank orduya +500 güç katar</span></div>
+      <div class="sm-row"><span>Toplam</span><span class="sm-price"><span id="tankCostP">10</span>👥 <span id="tankCostM">1500</span>💰 <span id="tankCostI">20</span>⛓️<span class="only2014"> <span id="tankCostT">10</span>⚙️</span></span></div>
+      <div class="sm-row" style="font-size:12px;opacity:.8"><span id="tankNote">Her tank orduya +500 güç katar</span></div>
       <button id="tankBuildBtn">Tank Üret</button>
       <button id="closeTank" class="sm-close">Kapat</button>
     </div>

@@ -39,5 +39,18 @@ export const EARTH_KM2_PER_STER = 6371*6371;   // ~40.6M km2 per steradian
 // footprint radius used for overlap checks (tiny: only blocks true overlap, allows adjacency)
 export const BUILD_R = 0.35;   // tiny: buildings only block if truly overlapping
 
-export function b_label(t){ return ({fishery:'Balıkçı Limanı',ranch:'Hayvancılık Çiftliği',oilwell:'Petrol Kuyusu',factory:'Sanayi Fabrikası',city:'Şehir',town:'Kasaba',port:'Liman',shipyard:'Tersane',base:'Askeri Üs',mine:'Maden Ocağı',bank:'Banka',garage:'Garaj',
+// ---- settlements: every province starts as a small village; upgrading costs money, bread and (1810) wood, ×1.5 per level
+export const SETTLE_NAMES = ['Köy', 'Kasaba', 'Şehir', 'Büyük şehir'];
+export const SETTLE_POP = [0, 250, 500, 750];          // population cap added by reaching each level
+export const UPGRADE_BASE = { money: 2500, bread: 250, wood: 60 };
+export const UPGRADE_MULT = 1.5;
+export const WOOD_PER_TREE = 1;                         // wood gathered per felled tree (1810)
+export const WOOD_COSTS = { port: 40, shipyard: 60, fishery: 25 };   // 1810: piers are built of timber
+export const SHIP_WOOD_1810 = 30;                       // a sailing ship needs timber
+export const TANK_TECH = 10, SHIP_TECH = 25;            // 2014: tanks and warships need technology
+export const CANNON_COST_MONEY = 1000;                  // 1810 cannon (replaces tanks)
+
+let LABEL_ERA = '2014';
+export function setLabelEra(e){ LABEL_ERA = e; }
+export function b_label(t){ if(t==='garage' && LABEL_ERA==='1810') return 'Top Dökümhanesi'; return ({fishery:'Balıkçı Limanı',ranch:'Hayvancılık Çiftliği',oilwell:'Petrol Kuyusu',factory:'Sanayi Fabrikası',city:'Şehir',town:'Kasaba',port:'Liman',shipyard:'Tersane',base:'Askeri Üs',mine:'Maden Ocağı',bank:'Banka',garage:'Garaj',
   field:'Tarla',farm:'Çiftlik',forest:'Orman',mountain:'Dağ',choco:'Çikolata Fabrikası'})[t]||t; }

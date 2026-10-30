@@ -100,22 +100,26 @@ function trunkGeo(kind) {
   return mergeGeometries([t.toNonIndexed(), br.toNonIndexed()]);
 }
 
-// place(x,z) -> true if a tree may stand there
-export function addVegetation(scene, T, B, rng, canPlace) {
+// canPlace(x,z,r) -> true if a tree may grow there naturally; blocked(x,z) -> true if it has since been cut down or built over.
+// The natural forest is decided first, so clearing a wood or adding a building never reshuffles trees elsewhere.
+export function addVegetation(scene, T, B, rng, canPlace, blocked = null) {
   const kinds = Object.entries(B.trees);
-  const pickKind = (h) => {
+  const pickKind = (h, r) => {
     if (B.trees.pine && h > 3.6) return 'pine';
-    let r = rng(); for (const [k, w] of kinds) { if ((r -= w) <= 0) return k; } return kinds[0][0];
+    for (const [k, w] of kinds) { if ((r -= w) <= 0) return k; } return kinds[0][0];
   };
+  // every candidate draws the same random numbers whether it grows or not, so the forest is identical on every visit
   const trees = [];
   for (let i = 0; i < 20000 * AREA && trees.length < B.treeCap * AREA; i++) {
-    const x = (rng() - .5) * (SIZE - 2), z = (rng() - .5) * (SIZE - 2), f = T.forestAt(x, z);
-    const p = f > B.forest ? .8 : (f > B.forest - .06 ? .12 : .018);
-    if (rng() > p || !canPlace(x, z, .4)) continue;
-    const h = T.H(x, z), kind = pickKind(h);
-    if (kind === 'palm' && B.label !== 'Tropik' && T.riverDist(x, z) > 9 && T.coastAt(x, z) < -14 && rng() < .8) continue; // desert palms cluster by water
-    trees.push({ x, z, y: h, kind, s: .75 + rng() * .65, r: rng() * 6.3 });
+    const x = (rng() - .5) * (SIZE - 2), z = (rng() - .5) * (SIZE - 2), roll = rng(), kr = rng(), pr = rng(), s = .75 + rng() * .65, r = rng() * 6.3, c = rng(), ck = rng();
+    const f = T.forestAt(x, z), p = f > B.forest ? .8 : (f > B.forest - .06 ? .12 : .018);
+    if (roll > p || !canPlace(x, z, .4)) continue;
+    const h = T.H(x, z), kind = pickKind(h, kr);
+    if (kind === 'palm' && B.label !== 'Tropik' && T.riverDist(x, z) > 9 && T.coastAt(x, z) < -14 && pr < .8) continue; // desert palms cluster by water
+    trees.push({ x, z, y: h, kind, s, r, c, ck });
   }
+  const stumps = [];
+  if (blocked) for (let i = trees.length - 1; i >= 0; i--) { const t = trees[i], b = blocked(t.x, t.z); if (b) { if (b === 'cut') stumps.push(t); trees.splice(i, 1); } }
   const dmy = new THREE.Object3D(), col = new THREE.Color();
   const vegMat = new THREE.MeshStandardMaterial({ roughness: .9 });
   const trunkMat = new THREE.MeshStandardMaterial({ color: '#5a4330', roughness: 1 });
@@ -128,9 +132,9 @@ export function addVegetation(scene, T, B, rng, canPlace) {
     list.forEach((t, i) => {
       dmy.position.set(t.x, t.y - .05, t.z); dmy.rotation.set(0, t.r, 0); dmy.scale.setScalar(t.s); dmy.updateMatrix();
       crown.setMatrixAt(i, dmy.matrix); if (trunk) trunk.setMatrixAt(i, dmy.matrix);
-      items.push({ x: t.x, z: t.z, i, meshes: trunk ? [crown, trunk] : [crown] });
+      items.push({ x: t.x, z: t.z, i, tree: true, kind, s: t.s, y: t.y - .05, r: t.r, meshes: trunk ? [crown, trunk] : [crown], crown });
       const pal = LEAF[kind] || (kind === 'pine' ? ['#2f5530', '#2a4a2b', '#355f35', '#24442a'] : B.leaf);
-      crown.setColorAt(i, col.set(pal[Math.floor(rng() * pal.length)]).multiplyScalar(.85 + rng() * .3));
+      crown.setColorAt(i, col.set(pal[Math.floor(t.c * pal.length)]).multiplyScalar(.85 + t.ck * .3));
     });
     for (const m of [crown, trunk]) if (m) { m.castShadow = true; m.receiveShadow = true; scene.add(m); meshes.push(m); }
   }
@@ -139,7 +143,7 @@ export function addVegetation(scene, T, B, rng, canPlace) {
   for (let i = 0; i < 9000 * AREA; i++) {
     const x = (rng() - .5) * (SIZE - 2), z = (rng() - .5) * (SIZE - 2), h = T.H(x, z), sl = T.slope(x, z);
     if (rocks.length < 520 * AREA && (sl > .9 || h > 5.5 || (B.dunes && rng() < .02)) && h > .3 && rng() < .5 && T.roadDist(x, z) > 1.5) rocks.push([x, h, z, .25 + rng() * .7]);
-    else if (bushes.length < (B.label === 'Kutup' ? 0 : 1000 * AREA) && h > .5 && h < 5 && sl < .6 && rng() < .2 && canPlace(x, z, .3)) bushes.push([x, h, z, .18 + rng() * .22]);
+    else if (bushes.length < (B.label === 'Kutup' ? 0 : 1000 * AREA) && h > .5 && h < 5 && sl < .6 && rng() < .2 && canPlace(x, z, .3) && !(blocked && blocked(x, z))) bushes.push([x, h, z, .18 + rng() * .22]);
   }
   const rockM = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ roughness: .95, flatShading: true }), Math.max(1, rocks.length));
   rockM.count = rocks.length;
@@ -150,7 +154,7 @@ export function addVegetation(scene, T, B, rng, canPlace) {
   bushM.count = bushes.length;
   bushes.forEach(([x, y, z, s], i) => { items.push({ x, z, i, meshes: [bushM] }); dmy.position.set(x, y + s * .4, z); dmy.rotation.set(0, rng() * 3, 0); dmy.scale.set(s * 1.3, s, s * 1.3); dmy.updateMatrix(); bushM.setMatrixAt(i, dmy.matrix); bushM.setColorAt(i, col.set(B.leaf[i % B.leaf.length]).multiplyScalar(.85 + rng() * .3)); });
   for (const m of [rockM, bushM]) { m.castShadow = true; m.receiveShadow = true; scene.add(m); meshes.push(m); }
-  return { count: trees.length, meshes, items };
+  return { count: trees.length, meshes, items, stumps };
 }
 
 // forests continuing into the countryside beyond the playable square (no shadows, never cleared)

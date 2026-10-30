@@ -6,7 +6,7 @@ import { feature } from 'topojson-client';
 import polygonClipping from 'polygon-clipping';
 import { Peer } from 'peerjs';
 import { S, pick } from './core/state.js';
-import { RegionView } from './region/RegionView.js';
+import { RegionView, treeKey } from './region/RegionView.js';
 import { HALF as REGION_HALF } from './region/terrain.js';
 import { loadPrefabs, PREFABS } from './region/prefabs.js';
 import { prefabGroup } from './region/life.js';
@@ -25,7 +25,8 @@ import { MIL_K, USA_K, MIL_1810, MIL_1810_MAX } from './data/military.js';
 import { MINERALS, DEPOSITS, resourceAt } from './data/resources.js';
 import { MTN, FOR, MTN_FOOTPRINT, TREE_FOOTPRINT } from './data/terrain.js';
 import { EMPIRES, BOT_COLORS, BOT_NAMES, PLAYER_COLORS } from './data/empires.js';
-import { MONTHS_TR, CITY_BREAD_COST, TOWN_BREAD_COST, BANK_CAP, M_SHIP, CITY_POP, TOWN_POP, ARMY_UNIT, ARMY_UNIT_COST, ARMY_UNIT_POP, COSTS, TANK_COST_MONEY, SHIP_COST, BATTLE_TIME, EARTH_KM2_PER_STER, BUILD_R, b_label, M_FARM, M_FIELD, M_PORTYARD, M_CITY, M_TOWN, M_BASE, M_OTHER, TANK_COST_POP, TANK_COST_IRON, TANK_ARMY } from './sim/constants.js';
+import { MONTHS_TR, CITY_BREAD_COST, TOWN_BREAD_COST, BANK_CAP, M_SHIP, CITY_POP, TOWN_POP, ARMY_UNIT, ARMY_UNIT_COST, ARMY_UNIT_POP, COSTS, TANK_COST_MONEY, SHIP_COST, BATTLE_TIME, EARTH_KM2_PER_STER, BUILD_R, b_label, M_FARM, M_FIELD, M_PORTYARD, M_CITY, M_TOWN, M_BASE, M_OTHER, TANK_COST_POP, TANK_COST_IRON, TANK_ARMY,
+  SETTLE_NAMES, SETTLE_POP, UPGRADE_BASE, UPGRADE_MULT, WOOD_PER_TREE, WOOD_COSTS, SHIP_WOOD_1810, TANK_TECH, SHIP_TECH, CANNON_COST_MONEY, setLabelEra } from './sim/constants.js';
 import { make2xLabel, mountain, tree, BUILDERS, makeCat, makeFire, makeCapitalMarker, setModelContext } from './render/models.js';
 import { cultureFor } from './region/biomes.js';
 import { Formation } from './units/Formation.js';
@@ -239,17 +240,17 @@ renderer.domElement.addEventListener('pointerup',e=>{
 
   // clicking a shipyard opens the ship menu (unless actively placing a building)
   if(!buildType && shipyards.length){
-    const sHit=ray.intersectObjects(shipyards,true)[0];
+    const sHit=ray.intersectObjects(shipyards.filter(o=>o.visible),true)[0];
     if(sHit){ let o=sHit.object; while(o && !shipyards.includes(o)) o=o.parent; openShipMenu(o); return; }
   }
   // clicking a military base opens the army recruitment menu
   if(!buildType && bases.length){
-    const bHit=ray.intersectObjects(bases,true)[0];
+    const bHit=ray.intersectObjects(bases.filter(o=>o.visible),true)[0];
     if(bHit){ let o=bHit.object; while(o && !o.userData.buildRec) o=o.parent; openArmyMenu(o && o.userData.buildRec.prov); return; }
   }
   // clicking a garage opens the tank menu
   if(!buildType && garages.length){
-    const gHit=ray.intersectObjects(garages,true)[0];
+    const gHit=ray.intersectObjects(garages.filter(o=>o.visible),true)[0];
     if(gHit){ let o=gHit.object; while(o && !o.userData.buildRec) o=o.parent; openTankMenu(o && o.userData.buildRec.prov); return; }
   }
 
@@ -287,44 +288,23 @@ renderer.domElement.addEventListener('pointerup',e=>{
   else { hideInvade(); hideProvince(); }
 });
 
-// ---- placement hologram ----
-let ghost=null, ghostType=null;
-function clearGhost(){ if(ghost){ worldGroup.remove(ghost);
-  ghost.traverse(o=>{ if(o.geometry)o.geometry.dispose(); if(o.material)o.material.dispose&&o.material.dispose(); });
-  ghost=null; ghostType=null; } }
-function makeGhost(type){
-  const fn=BUILDERS[type]; if(!fn) return null;
-  const g=fn();
-  g.scale.setScalar(0.06);
-  g.traverse(o=>{ if(o.isMesh){ o.material=new THREE.MeshBasicMaterial({color:0x3d9cff, transparent:true, opacity:0.45, depthWrite:false}); } });
-  return g;
-}
-function tintGhost(ok){ const c=ok?0x3d9cff:0xff4444;
-  ghost.traverse(o=>{ if(o.isMesh&&o.material) o.material.color.setHex(c); }); }
+// (the old world-map placement hologram: buildings are placed only in the region view now)
+let ghost=null;
+function clearGhost(){ if(ghost){ worldGroup.remove(ghost); ghost=null; } }
 
 renderer.domElement.addEventListener('pointermove',e=>{
   if(view!=='world') return;
   const r=renderer.domElement.getBoundingClientRect();
   ptr.x=((e.clientX-r.left)/r.width)*2-1; ptr.y=-((e.clientY-r.top)/r.height)*2+1;
-  // hover highlight: glow the country under the cursor (skip while placing a building)
-  if(!buildType){
+  // hover highlight: glow the country under the cursor (with a building chosen: shows which region it will open)
+  {
     ray.setFromCamera(ptr,camera);
     const h=ray.intersectObjects(countryMeshes,false)[0];
     const name = h && h.object.userData.country;
     const pid = pickingHome ? null : h && h.object.userData.prov;   // choosing a home country: whole countries only
     if(name!==hoverCountry || (pid||null)!==hoverProvId){ hoverProvId=pid||null; setHoverCountry(name||null); }
   }
-  if(!buildType){ if(ghost) clearGhost(); return; }
-  if(ghostType!==buildType){ clearGhost(); ghost=makeGhost(buildType); ghostType=buildType; if(ghost) worldGroup.add(ghost); }
-  if(!ghost) return;
-  ray.setFromCamera(ptr,camera);
-  const hit=ray.intersectObjects(countryMeshes,false)[0];
-  if(!hit){ ghost.visible=false; return; }
-  ghost.visible=true;
-  const lp=worldGroup.worldToLocal(hit.point.clone());   // world -> local (handles map scaling)
-  ghost.position.set(lp.x, DEPTH, lp.z);
-  const affordable = (S.money >= (COSTS[buildType]||0)) && (buildType!=='city' || S.bread>=CITY_BREAD_COST) && (buildType!=='town' || S.bread>=TOWN_BREAD_COST);
-  tintGhost(affordable && canPlaceAt(buildType, lp.x, lp.z));
+  if(ghost) clearGhost();   // buildings are placed (and seen) only in the region close-up
 });
 
 // ---- hover highlight helpers ----
@@ -451,6 +431,7 @@ function persDefendMult(){
   return 1;
 }
 function monthlyUpkeep(){
+  recountSettlements();   // provinces won or lost change how many towns and cities we keep
   return S.shipCount*M_SHIP + S.farmCount*M_FARM + S.fieldCount*M_FIELD + S.portShipyardCount*M_PORTYARD
     + (S.cityCount-S.freeCityCount)*M_CITY + S.townCount*M_TOWN + S.baseCount*M_BASE + S.nonChocoBuildings*M_OTHER;
 }
@@ -470,6 +451,9 @@ function updatePop(){ if(popVal) popVal.textContent = Math.floor(S.population)+'
 function updateArmy(){ if(armyVal) armyVal.textContent = S.army; }
 function updateIron(){ if(ironVal) ironVal.textContent = Math.floor(S.iron); }
 function updateBread(){ if(breadVal) breadVal.textContent = Math.floor(S.bread); }
+function updateWood(){ const el=document.getElementById('woodVal'); if(el) el.textContent = Math.floor(S.wood); }
+// 1810: piers and ports are built of timber
+function woodCost(type){ return S.currentEra==='1810' ? (WOOD_COSTS[type]||0) : 0; }
 function updateCalendar(){
   const totalDays=Math.floor(S.gameDays);
   const day=(totalDays%30)+1;
@@ -1065,10 +1049,31 @@ setInterval(autosaveGame, 5000);
 addEventListener('pagehide', autosaveGame);
 document.addEventListener('visibilitychange', ()=>{ if(document.hidden) autosaveGame(); });
 
+// what differs between the eras in the menus: 1810 has wood and cannons, 2014 technology and tanks
+function applyEraUI(era){
+  document.body.dataset.era=era; setLabelEra(era);
+  const is1810=era==='1810';
+  const gb=document.querySelector('.bopt[data-b="garage"]');
+  if(gb) gb.innerHTML= is1810? '💣 Top Dökümhanesi (1000)<span class="binfo">Top döker · Üstüne tıkla</span>' : '🏭 Garaj (1000)<span class="binfo">Tank üretir · teknoloji ister</span>';
+  for(const [t, ico, name] of [['port','⚓','Liman'],['shipyard','🚢','Tersane'],['fishery','🐟','Balıkçı Limanı']]){
+    const b=document.querySelector('.bopt[data-b="'+t+'"]'); if(!b) continue;
+    const info=b.querySelector('.binfo'), keep=info? info.outerHTML : '';
+    b.innerHTML=ico+' '+name+' ('+COSTS[t]+(is1810? ' + '+WOOD_COSTS[t]+'🪵' : '')+')'+keep;
+  }
+  const ta=document.querySelector('#tankAct span'); if(ta) ta.textContent= is1810? 'Top' : 'Tank';
+  document.getElementById('tankAct').title= is1810? 'Top' : 'Tank';
+  document.getElementById('tankPer').textContent= is1810? '10 👥 · '+CANNON_COST_MONEY+' 💰 · 20 ⛓️ · 5 kömür' : '10 👥 · '+TANK_COST_MONEY+' 💰 · 20 ⛓️ · '+TANK_TECH+' ⚙️ · 15 petrol';
+  document.getElementById('tankPerLbl').textContent= is1810? 'Top başına' : 'Tank başına';
+  document.getElementById('tankBuildBtn').textContent= is1810? 'Top Dök' : 'Tank Üret';
+  document.getElementById('tankNote').textContent= is1810? 'Her top orduya +500 güç katar' : 'Her tank orduya +500 güç katar';
+  document.getElementById('shipPrice').textContent= is1810? SHIP_COST+' 💰 · '+SHIP_WOOD_1810+' 🪵' : SHIP_COST+' 💰 · 20 petrol · '+SHIP_TECH+' ⚙️';
+  updateWood();
+}
 function loadEra(era){
   if(worldBuilt || mapLoading) return;
   if(!gameId) setGameLink(Math.random().toString(36).slice(2, 8)+Date.now().toString(36).slice(-3));
   S.currentEra=era;
+  applyEraUI(era);
   S.START_YEAR = (era==='1810') ? 1810 : 2014;
   updateCalendar();
   mapLoading=true;
@@ -1384,6 +1389,10 @@ function placeBuilding(point, opts={}){
     hintEl.textContent = 'Yetersiz para! '+b_label(buildType)+' için '+cost+' gerekli (elinde '+Math.floor(S.money)+').';
     return;
   }
+  if(woodCost(buildType)>S.wood){
+    hintEl.textContent = '🪵 Yetersiz odun! '+b_label(buildType)+' için '+woodCost(buildType)+' odun gerekli (elinde '+Math.floor(S.wood)+'). Bölgede bir ormana tıklayıp odun topla.';
+    return;
+  }
   if(buildType==='city' && S.bread < CITY_BREAD_COST){
     hintEl.textContent = 'Yetersiz ekmek! Şehir için '+CITY_BREAD_COST+' ekmek gerekli (elinde '+Math.floor(S.bread)+').';
     return;
@@ -1409,9 +1418,11 @@ function spawnBuilding(type, x, z, mineral, silent){
   const g=fn();
   g.position.set(x, DEPTH, z);
   g.rotation.y=Math.random()*Math.PI*2;
-  g.scale.setScalar(0.06);   // detailed models, readable when zoomed in
+  g.scale.setScalar(0.06);
+  g.visible=false;   // what we build is seen only in the region close-up, never from above on the world map
   worldGroup.add(g);
   if(!silent && cost>0){ S.money -= cost; updateMoney(); }
+  if(!silent && woodCost(type)>0){ S.wood -= woodCost(type); updateWood(); }
   const prov=provAt(x,z), lvl0=prov && !silent ? devLevel(provDevPoints(prov.id)) : 0;
   const rec={ group:g, type:type, cost:cost, x:x, z:z, mineral:mineral||null, undo:null, prov: prov? prov.id : null };
   let undo=()=>{};
@@ -1444,7 +1455,7 @@ function spawnBuilding(type, x, z, mineral, silent){
   if(type==='garage'){ g.userData.garage=true; g.traverse(o=>{ if(o.isMesh) o.userData.garage=true; });
     garages.push(g);
     undo=()=>{ const i=garages.indexOf(g); if(i>=0)garages.splice(i,1); };
-    if(!silent) hintEl.textContent='Garaj kuruldu! Üstüne tıklayıp tank üretebilirsin (10 insan + 1500 para + 20 demir).'; }
+    if(!silent) hintEl.textContent= S.currentEra==='1810' ? 'Top dökümhanesi kuruldu! Üstüne tıklayıp top dökebilirsin (10 insan + '+CANNON_COST_MONEY+' para + 20 demir + 5 kömür).' : 'Garaj kuruldu! Üstüne tıklayıp tank üretebilirsin (10 insan + 1500 para + 20 demir + '+TANK_TECH+' teknoloji).'; }
   if(type==='farm'){ S.farmCount++;
     // boost a random not-yet-boosted field to 2 bread/sec and mark it with a "2x" label
     const plain=fields.filter(fd=>fd.rate<2);
@@ -1496,7 +1507,11 @@ document.getElementById('buildShip').onclick=()=>{
   }
   if(S.currentEra==='2014'){
     if(S.goods.oil<20){ hintEl.textContent='⚠️ Modern gemi için 20 petrol gerekir (elinde '+Math.floor(S.goods.oil)+'). Ticaret\'ten alabilirsin.'; return; }
-    S.goods.oil-=20;
+    if(S.goods.tech<SHIP_TECH){ hintEl.textContent='⚙️ Savaş gemisi için '+SHIP_TECH+' teknoloji gerekir (elinde '+Math.floor(S.goods.tech)+'). Sanayi fabrikası kur ya da Ticaret\'ten al.'; return; }
+    S.goods.oil-=20; S.goods.tech-=SHIP_TECH;
+  } else {
+    if(S.wood<SHIP_WOOD_1810){ hintEl.textContent='🪵 Yelkenli için '+SHIP_WOOD_1810+' odun gerekir (elinde '+Math.floor(S.wood)+'). Bölgelerindeki ormanlardan odun topla.'; return; }
+    S.wood-=SHIP_WOOD_1810; updateWood();
   }
   S.money -= shipCost; updateMoney();
   const s=makeShip(S.currentEra);
@@ -1561,16 +1576,18 @@ document.getElementById('recruitBtn').onclick=()=>{
 // ---- tank menu (garage) ----
 const tankMenu=document.getElementById('tankmenu');
 const tankQty=document.getElementById('tankQty');
+const vehMoney=()=>S.currentEra==='1810'? CANNON_COST_MONEY : TANK_COST_MONEY;   // 1810: cannons instead of tanks
 function refreshTankCost(){
   let n=parseInt(tankQty.value)||0; if(n<1)n=1;
   document.getElementById('tankCostP').textContent=n*TANK_COST_POP;
-  const sp=specOf(tankMenuProv); document.getElementById('tankCostM').textContent=Math.round(n*TANK_COST_MONEY*ideoMilitaryCostMult()*(sp==='sanayi'? .8 : sp==='askeri'? .9 : 1));
+  const sp=specOf(tankMenuProv); document.getElementById('tankCostM').textContent=Math.round(n*vehMoney()*ideoMilitaryCostMult()*(sp==='sanayi'? .8 : sp==='askeri'? .9 : 1));
   document.getElementById('tankCostI').textContent=n*TANK_COST_IRON;
+  document.getElementById('tankCostT').textContent=n*TANK_TECH;
 }
 function openTankMenu(prov){
   const withGarage=provsWith('garage');
   tankMenuProv = prov || (withGarage.includes(selectedProv) ? selectedProv : withGarage[0]) || (capitalProv(S.homeName)||{}).id;
-  document.querySelector('#tankmenu .sm-title').textContent='🏭 Garaj — '+((PI.byId[tankMenuProv]||{}).name||'');
+  document.querySelector('#tankmenu .sm-title').textContent=(S.currentEra==='1810'? '💣 Top Dökümhanesi — ' : '🏭 Garaj — ')+((PI.byId[tankMenuProv]||{}).name||'');
   tankQty.value=1; refreshTankCost(); tankMenu.classList.add('open');
 }
 document.getElementById('closeTank').onclick=()=>tankMenu.classList.remove('open');
@@ -1579,16 +1596,18 @@ document.getElementById('tankMinus').onclick=()=>{ tankQty.value=Math.max(1,(par
 tankQty.oninput=refreshTankCost;
 document.getElementById('tankBuildBtn').onclick=()=>{
   let n=parseInt(tankQty.value)||0; n=Math.max(1,n);
-  const sp=specOf(tankMenuProv), cm=Math.round(n*TANK_COST_MONEY*ideoMilitaryCostMult()*(sp==='sanayi'? .8 : sp==='askeri'? .9 : 1)), cp=n*TANK_COST_POP, ci=n*TANK_COST_IRON;
-  if(S.money<cm){ hintEl.textContent='Yetersiz para! '+n+' tank için '+cm+' gerekli.'; return; }
-  if(Math.floor(S.population)<cp){ hintEl.textContent='Yetersiz nüfus! '+n+' tank için '+cp+' kişi gerekli.'; return; }
-  if(S.iron<ci){ hintEl.textContent='Yetersiz demir! '+n+' tank için '+ci+' demir gerekli (mevcut: '+Math.floor(S.iron)+').'; return; }
+  const is1810=S.currentEra==='1810', un=is1810? 'top' : 'tank';
+  const sp=specOf(tankMenuProv), cm=Math.round(n*vehMoney()*ideoMilitaryCostMult()*(sp==='sanayi'? .8 : sp==='askeri'? .9 : 1)), cp=n*TANK_COST_POP, ci=n*TANK_COST_IRON, ct=is1810? 0 : n*TANK_TECH;
+  if(S.money<cm){ hintEl.textContent='Yetersiz para! '+n+' '+un+' için '+cm+' gerekli.'; return; }
+  if(Math.floor(S.population)<cp){ hintEl.textContent='Yetersiz nüfus! '+n+' '+un+' için '+cp+' kişi gerekli.'; return; }
+  if(S.iron<ci){ hintEl.textContent='Yetersiz demir! '+n+' '+un+' için '+ci+' demir gerekli (mevcut: '+Math.floor(S.iron)+').'; return; }
+  if(S.goods.tech<ct){ hintEl.textContent='⚙️ Yetersiz teknoloji! '+n+' tank için '+ct+' teknoloji gerekli (elinde '+Math.floor(S.goods.tech)+'). Sanayi fabrikası kur ya da Ticaret\'ten al.'; return; }
   const co=n*(S.currentEra==='2014'? 15 : 5), oilName=goodLabel('oil', S.currentEra);
-  if(S.goods.oil<co){ hintEl.textContent='⚠️ Yetersiz '+oilName.toLocaleLowerCase('tr')+'! '+n+' tank için '+co+' gerekli (elinde '+Math.floor(S.goods.oil)+'). Petrol kuyusu kur ya da Ticaret\'ten al.'; return; }
-  S.goods.oil-=co;
+  if(S.goods.oil<co){ hintEl.textContent='⚠️ Yetersiz '+oilName.toLocaleLowerCase('tr')+'! '+n+' '+un+' için '+co+' gerekli (elinde '+Math.floor(S.goods.oil)+'). Petrol kuyusu kur ya da Ticaret\'ten al.'; return; }
+  S.goods.oil-=co; S.goods.tech-=ct;
   S.money-=cm; S.population-=cp; S.iron-=ci; S.tankCount+=n; addTroops(tankMenuProv, n*TANK_ARMY);
   updateMoney(); updatePop(); updateIron(); updateArmy();
-  hintEl.textContent=n+' tank üretildi! Orduya +'+(n*TANK_ARMY)+' güç. Toplam tank: '+S.tankCount+'.';
+  hintEl.textContent=(is1810? '💣 '+n+' top döküldü' : n+' tank üretildi')+'! Orduya +'+(n*TANK_ARMY)+' güç. Toplam '+un+': '+S.tankCount+'.';
 };
 
 // projected area (world units) of a feature's largest polygon
@@ -1694,8 +1713,7 @@ function chooseEmpire(emp){
     (meshesByCountry[c]||[]).forEach(m=>m.material.color.copy(OWN_COLOR)); });
   redrawBorders();
   // capital city on the home country (free)
-  const cap=capitalXZ(home);
-  if(cap && !overlapsObstacle(cap[0],cap[1])){ S._spawnFreeCity=true; spawnBuilding('city', cap[0], cap[1], null, true); }
+  S.popCap += CITY_POP; updatePop();   // the capital's people (every province starts as a village: upgrade it from the region view)
   document.body.classList.add('ingame'); document.getElementById('saveBtn').classList.add('show'); document.getElementById('taxbar').classList.add('show'); document.getElementById('exitBtn').classList.add('show'); document.getElementById('rankBtn').classList.add('show');
   hintEl.textContent=emp.label+' kuruldu! '+present.length+' ülke senin. Başka ülkelere saldırabilirsin.';
 }
@@ -1732,10 +1750,9 @@ function finalizeHome2(pers){
   const ideoLabel = S.ideology==='socialism'?'☭ Sosyalizm':S.ideology==='capitalism'?'💰 Kapitalizm':'⚔️ Militarizm';
   const persLabel = pers==='peaceful'?'🕊️ Barışçıl':pers==='warlike'?'🗡️ Savaşçı':'🛠️ Çalışkan';
   selinfo.innerHTML=flagFor(name)+' <b>'+name+'</b> — '+ideoLabel+' · '+persLabel;
-  hintEl.textContent=name+' senin ülken ('+ideoLabel+', '+persLabel+'). 🕊️ İlk '+Math.round(peaceMonthsLeft())+' ay barış: kimse sana saldırmaz — bu sürede şehir, maden ve ordu kur.';
+  hintEl.textContent=name+' senin ülken ('+ideoLabel+', '+persLabel+'). 🕊️ İlk '+Math.round(peaceMonthsLeft())+' ay barış: kimse sana saldırmaz — bu sürede köylerini kasabaya yükselt, maden ve ordu kur.';
   annexCountry(name, true);   // claim the home country (isHome)
-  const cap=capitalXZ(name);
-  if(cap && !overlapsObstacle(cap[0],cap[1])){ S._spawnFreeCity=true; spawnBuilding('city', cap[0], cap[1], null, true); }
+  S.popCap += CITY_POP; updatePop();   // the capital's people (every province starts as a village: upgrade it from the region view)
   document.body.classList.add('ingame'); document.getElementById('saveBtn').classList.add('show'); document.getElementById('taxbar').classList.add('show'); document.getElementById('exitBtn').classList.add('show'); document.getElementById('rankBtn').classList.add('show');
   document.getElementById('rankBtn').classList.add('show');
   refreshTaxHint();
@@ -1804,6 +1821,7 @@ function goodAdd(k, n){
   else if(k==='iron'){ S.iron=Math.max(0, S.iron+n); updateIron(); }
   else S.goods[k]=Math.max(0, (S.goods[k]||0)+n);
 }
+const eraGoods=()=>S.currentEra==='1810'? GOOD_KEYS.filter(k=>k!=='tech') : GOOD_KEYS;   // 1810: no technology to trade
 const PRODUCE={ fishery:['fish',1], ranch:['livestock',1], oilwell:['oil',.5], factory:['tech',.3] };
 // per-second output of every good
 function productionRates(){
@@ -1827,20 +1845,20 @@ function feedPeople(){
   const l=Math.min(S.goods.livestock, left); S.goods.livestock-=l; left-=l; S.goods.fish-=left;
   S.fed=true; return ' Halk doyuruldu ('+need+' gıda).';
 }
-const techBonus=()=>Math.min(.3, (S.goods.tech||0)/3000);   // stockpiled technology: up to +30% attack
+const techBonus=()=>S.currentEra==='1810'? 0 : Math.min(.3, (S.goods.tech||0)/3000);   // 1810 has no technology   // stockpiled technology: up to +30% attack
 
 // ---- market + barter offers from the bot empires
 let marketDrift={}, tradeOffers=[];
 function price(k, side){ const d=marketDrift[k]||1, b=GOODS[k].base*d; return Math.max(1, Math.round(side==='buy'? b*1.25 : b*.8)); }
 function rollTradeOffers(){
-  for(const k of GOOD_KEYS) marketDrift[k]=Math.max(.7, Math.min(1.4, (marketDrift[k]||1)*(.9+Math.random()*.2)));
+  for(const k of eraGoods()) marketDrift[k]=Math.max(.7, Math.min(1.4, (marketDrift[k]||1)*(.9+Math.random()*.2)));
   const me=profileOf(S.homeName); if(!me || !bots.length) return;
-  const mine=GOOD_KEYS.slice().sort((a,b)=>me.mult[b]-me.mult[a]);
+  const mine=eraGoods().slice().sort((a,b)=>me.mult[b]-me.mult[a]);
   tradeOffers=[];
   for(const b of bots.filter(b=>b.owned.size).sort(()=>Math.random()-.5).slice(0,3)){
     const home=b.home && b.owned.has(b.home)? b.home : [...b.owned][0], pr=profileOf(home); if(!pr) continue;
     // they give what they are best at and we lack; they want what we are good at
-    const give=GOOD_KEYS.slice().sort((x,y)=>(pr.mult[y]-me.mult[y])-(pr.mult[x]-me.mult[x]))[0];
+    const give=eraGoods().slice().sort((x,y)=>(pr.mult[y]-me.mult[y])-(pr.mult[x]-me.mult[x]))[0];
     const want=mine.find(k=>k!==give && pr.mult[k]<=me.mult[k]) || mine[0]; if(want===give) continue;
     const gq=Math.round((100+Math.random()*200)/10)*10, wq=Math.max(10, Math.round(gq*GOODS[give].base/GOODS[want].base*.9/5)*5);
     tradeOffers.push({ bot:b.name, color:b.colorHex, country:home, give, gq, want, wq });
@@ -1854,7 +1872,7 @@ function renderTrade(){
   document.getElementById('trIdent').innerHTML='<div class="tr-flag">'+flagFor(S.homeName)+'</div><div><b>'+pr.title+'</b><p>'+pr.desc+'</p>'+
     '<div class="tr-chips">'+pr.strengths.map(k=>chip(k,'up')).join('')+pr.weaknesses.map(k=>chip(k,'dn')).join('')+'</div></div>';
   document.getElementById('trGoods').innerHTML='<div class="tr-row tr-h"><span>Mal</span><span>Stok</span><span>Üretim/ay</span><span>Sat</span><span>Al</span></div>'+
-    GOOD_KEYS.map(k=>'<div class="tr-row"><span>'+GOODS[k].icon+' '+goodLabel(k,era)+'</span><b>'+Math.floor(goodGet(k)).toLocaleString('tr-TR')+'</b><span>'+Math.round(rates[k]*30)+'</span>'+
+    eraGoods().map(k=>'<div class="tr-row"><span>'+GOODS[k].icon+' '+goodLabel(k,era)+'</span><b>'+Math.floor(goodGet(k)).toLocaleString('tr-TR')+'</b><span>'+Math.round(rates[k]*30)+'</span>'+
       '<button data-sell="'+k+'" title="100 sat">−100 · +'+price(k,'sell')*100+'</button><button data-buy="'+k+'" title="100 al">+100 · −'+price(k,'buy')*100+'</button></div>').join('');
   document.getElementById('trOffers').innerHTML= tradeOffers.length ? tradeOffers.map((o,i)=>'<div class="tr-offer"><i style="background:'+o.color+'"></i><div><b>'+o.bot+'</b> <small>('+o.country+')</small><br>'+
     'Verir: <b>'+o.gq+' '+GOODS[o.give].icon+' '+goodLabel(o.give,era)+'</b> · İster: <b>'+o.wq+' '+GOODS[o.want].icon+' '+goodLabel(o.want,era)+'</b></div><button data-offer="'+i+'"'+(goodGet(o.want)<o.wq?' disabled':'')+'>Kabul et</button></div>').join('')
@@ -1952,6 +1970,68 @@ function provDevPoints(id){
   return s;
 }
 function devLevel(pts){ let l=0; DEV_LEVELS.forEach(([t],i)=>{ if(pts>=t) l=i; }); return l; }
+
+// ---- settlements: every province of ours is a village of a few cottages; upgrading makes it a town, then a city.
+// Each step costs ×1.5 the last (money, bread and — in 1810 — wood). Level 3 adds people only, the city stays the same size.
+const SETTLE_MAX=3;
+const SETTLE_TO=['Köye','Kasabaya','Şehre','Büyük şehre'];   // dative: "… yükselt"
+function settleOf(id){ return S.settle[id]||0; }
+function upgradeCost(lvl){
+  const m=Math.pow(UPGRADE_MULT, lvl);
+  return { money:Math.round(UPGRADE_BASE.money*m), bread:Math.round(UPGRADE_BASE.bread*m), wood: S.currentEra==='1810' ? Math.round(UPGRADE_BASE.wood*m) : 0 };
+}
+const costText=c=>c.money+'💰 '+c.bread+'🍞'+(c.wood? ' '+c.wood+'🪵' : '');
+// towns and cities drive upkeep, growth and calm exactly like the old town/city buildings did
+function recountSettlements(){
+  let t=0, c=0;
+  for(const id in S.settle){ if(!ownsProv(id)) continue; const l=S.settle[id]; if(l===1) t++; else if(l>=2) c++; }
+  S.townCount=t; S.cityCount=c; S.freeCityCount=0;
+}
+function upgradeLabel(id){
+  const l=settleOf(id); if(l>=SETTLE_MAX) return null;
+  return { next:SETTLE_NAMES[l+1], cost:upgradeCost(l), pop:SETTLE_POP[l+1] };
+}
+function canAfford(c){ return S.money>=c.money && S.bread>=c.bread && S.wood>=c.wood; }
+async function upgradeSettlement(id){
+  if(!id || !ownsProv(id)) return;
+  const u=upgradeLabel(id); if(!u){ hintEl.textContent='Burası zaten en yüksek seviyede.'; return; }
+  const c=u.cost, miss=[];
+  if(S.money<c.money) miss.push((c.money-Math.floor(S.money))+' para');
+  if(S.bread<c.bread) miss.push((c.bread-Math.floor(S.bread))+' ekmek');
+  if(S.wood<c.wood) miss.push((c.wood-Math.floor(S.wood))+' odun');
+  if(miss.length){ hintEl.textContent='⚠️ '+u.next+' için eksik: '+miss.join(', ')+'.'+(S.wood<c.wood? ' Odunu bölgedeki ormanlara tıklayıp toplayabilirsin.' : ''); return; }
+  S.money-=c.money; S.bread-=c.bread; S.wood-=c.wood; updateMoney(); updateBread(); updateWood();
+  const l=settleOf(id)+1; S.settle[id]=l; S.popCap+=u.pop; updatePop(); recountSettlements();
+  const nm=(PI.byId[id]||{}).name||id;
+  hintEl.textContent='🏘️ '+nm+' artık bir '+SETTLE_NAMES[l].toLocaleLowerCase('tr')+'! Nüfus sınırı +'+u.pop+' → '+S.popCap+'.'+(l>=SETTLE_MAX? ' (en yüksek seviye)' : '');
+  if(selectedProv===id) fillProvince(false);
+  refreshUpgradeUI();
+  // rebuild the close-up around the bigger settlement, keeping the camera where it was
+  if(view==='region' && regionName===id && regionView && !_viewBusy){
+    _viewBusy=true; fadeView(true, nm+' büyüyor…'); await sleep(250); await nextFrame();
+    const cam={ t:regionView.controls.target.clone(), p:regionView.cam.position.clone(), z:regionView.cam.zoom };
+    try{ const info=regionInfoFor(id); regionView.build(info); regionSig=null; regionView.setLighting(currentSky());
+      regionView.resize(wrap.clientWidth, wrap.clientHeight); regionView.activate(); regionView.zoomFrom=null;
+      regionView.controls.target.copy(cam.t); regionView.cam.position.copy(cam.p); regionView.cam.zoom=cam.z; regionView.cam.updateProjectionMatrix();
+      document.getElementById('rhSub').textContent=regionSubtitle(id, regionView.info);
+      if(buildType) regionView.setGhost(buildType);
+    }catch(e){ console.error(e); }
+    fadeView(false); _viewBusy=false;
+  }
+}
+// the upgrade buttons (region header + province panel) show the next step and grey out when it can't be paid
+function refreshUpgradeUI(){
+  const set=(btn, id)=>{ if(!btn) return;
+    const own=id && ownsProv(id), u=own && upgradeLabel(id);
+    btn.style.display = own ? '' : 'none'; if(!own) return;
+    if(!u){ btn.innerHTML='🏙️ '+SETTLE_NAMES[settleOf(id)]+' · en yüksek seviye'; btn.disabled=true; btn.classList.remove('poor'); return; }
+    btn.disabled=false; btn.innerHTML='⬆️ '+SETTLE_TO[settleOf(id)+1]+' yükselt<small>'+costText(u.cost)+' · nüfus +'+u.pop+'</small>';
+    btn.classList.toggle('poor', !canAfford(u.cost));
+  };
+  set(document.getElementById('rhUpgrade'), view==='region' ? regionName : null);
+  set(document.getElementById('pvUpgrade'), selectedProv);
+}
+setInterval(refreshUpgradeUI, 500);
 function devInfo(id){
   const pts=provDevPoints(id), l=devLevel(pts), next=DEV_LEVELS[l+1];
   return { pts, level:l, name:DEV_LEVELS[l][1], next: next? next[0] : null, prev: DEV_LEVELS[l][0], nextName: next? next[1] : null };
@@ -3003,7 +3083,7 @@ new MutationObserver(()=>toast(hintEl.textContent.trim())).observe(hintEl, { chi
 // action bar
 const needs=(list, msg)=>{ if(list.length) return true; hintEl.textContent=msg; return false; };
 document.getElementById('armyAct').onclick=()=>{ if(needs(bases,'⚠️ Ordu kurmak için önce bir Askeri Üs inşa et (İnşa → Askeri Üs).')) openArmyMenu(); };
-document.getElementById('tankAct').onclick=()=>{ if(needs(garages,'⚠️ Tank üretmek için önce bir Garaj inşa et.')) openTankMenu(); };
+document.getElementById('tankAct').onclick=()=>{ if(needs(garages, S.currentEra==='1810'? '⚠️ Top dökmek için önce bir Top Dökümhanesi inşa et.' : '⚠️ Tank üretmek için önce bir Garaj inşa et.')) openTankMenu(); };
 document.getElementById('navyAct').onclick=()=>{ if(needs(shipyards,'⚠️ Gemi üretmek için kıyıya bir Tersane ve Liman inşa et.')) openShipMenu(shipyards[0]); };
 document.getElementById('tradeAct').onclick=()=>{
   const on=!tradePanel.classList.contains('show'); tradePanel.classList.toggle('show', on); document.getElementById('tradeAct').classList.toggle('on', on);
@@ -3180,10 +3260,19 @@ function fillProvince(resetSlider){
   document.getElementById('pvFlag').innerHTML=flagFor(p.country);
   document.getElementById('pvName').textContent=p.label;
   document.getElementById('pvSub').textContent=p.country+(p.capital? ' · başkent' : '');
-  document.getElementById('pvDevName').textContent=d.name+' (seviye '+(d.level+1)+'/5)';
-  document.getElementById('pvDevPts').textContent=d.pts+' puan';
-  document.getElementById('pvDevBar').style.width=(d.next? (d.pts-d.prev)/(d.next-d.prev)*100 : 100)+'%';
-  document.getElementById('pvDevNext').textContent=d.next? (d.next-d.pts)+' puan sonra '+d.nextName+' · bina kurdukça gelişir' : 'En yüksek seviye';
+  if(ownsProv(p.id)){   // ours: the settlement (village → town → city), grown with the upgrade button
+    const l=settleOf(p.id), u=upgradeLabel(p.id);
+    document.getElementById('pvDevName').textContent=SETTLE_NAMES[l]+' (seviye '+(l+1)+'/'+(SETTLE_MAX+1)+')';
+    document.getElementById('pvDevPts').textContent='';
+    document.getElementById('pvDevBar').style.width=(l/SETTLE_MAX*100)+'%';
+    document.getElementById('pvDevNext').textContent=u? 'Sonraki: '+u.next+' · '+costText(u.cost) : 'En yüksek seviye';
+  } else {
+    document.getElementById('pvDevName').textContent=d.name+' (seviye '+(d.level+1)+'/5)';
+    document.getElementById('pvDevPts').textContent=d.pts+' puan';
+    document.getElementById('pvDevBar').style.width=(d.next? (d.pts-d.prev)/(d.next-d.prev)*100 : 100)+'%';
+    document.getElementById('pvDevNext').textContent=d.next? (d.next-d.pts)+' puan sonra '+d.nextName : 'En yüksek seviye';
+  }
+  refreshUpgradeUI();
   document.getElementById('pvTroops').textContent=n.toLocaleString('tr-TR');
   document.getElementById('pvBuild').textContent=bs.length? bs.length+' ('+[...new Set(bs.map(r=>b_label(r.type)))].slice(0,3).join(', ')+(new Set(bs.map(r=>r.type)).size>3?'…':'')+')' : 'yok';
   document.getElementById('pvTax').textContent='+%'+Math.round(d.level*3);
@@ -3208,6 +3297,7 @@ document.getElementById('pvClose').onclick=()=>hideProvince();
 document.getElementById('pvRegion').onclick=()=>{ const id=selectedProv; hideProvince(); if(id) enterRegion(id); };
 document.getElementById('pvBuildHere').onclick=()=>{ const id=selectedProv; hideProvince(); if(id) enterRegion(id).then(()=>{ if(!buildPanel.classList.contains('open')) document.getElementById('buildBtn').click(); }); };
 document.getElementById('pvRecruit').onclick=()=>openArmyMenu(selectedProv);
+document.getElementById('pvUpgrade').onclick=()=>upgradeSettlement(selectedProv);
 document.getElementById('pvMoveBtn').onclick=()=>{
   const n=+pvMoveN.value; if(n<=0){ hintEl.textContent='Taşınacak asker sayısını seç.'; return; }
   movePick={ from:selectedProv, n }; document.body.classList.add('pick-move');
@@ -3472,12 +3562,15 @@ function regionInfoFor(idOrName){
   for(const g of placedBuildings){ const rec=g.userData.buildRec; if(!rec || rec.prov!==p.id) continue;
     const x=(rec.x-center[0])*k, z=(rec.z-center[1])*k;
     if(Math.abs(x)<REGION_HALF-7 && Math.abs(z)<REGION_HALF-7) buildings.push({ type:rec.type, x, z }); }
-  // how built-up it is: ours from our buildings, others from size and rank
-  const devLvl = isPlayer ? devLevel(provDevPoints(p.id)) : p.capital ? 3 : Math.min(2, Math.floor(rnd()*2.2 + (p.area>300? .8 : 0)));
+  // how built-up it is: ours from the settlement level (village → town → city), others from size and rank
+  const settle=isPlayer? settleOf(p.id) : 0;
+  const devLvl = isPlayer ? [0,1,2,2][settle] : p.capital ? 3 : Math.min(2, Math.floor(rnd()*2.2 + (p.area>300? .8 : 0)));
   const troops=isPlayer? (S.troops[p.id]||0) : 0;
   return { name:p.id, displayName:p.name, country, label:p.label, center, lon:ll[0], lat:ll[1], iso:ISO2[country] || null, era:S.currentEra, k, coast, mountains,
-    isPlayer, ownerColor, ownerName, ownerCulture: isPlayer ? cultureOfCountry(S.homeName) : null, buildings, devLevel:devLvl, devName:DEV_LEVELS[devLvl][1], profile:(profileOf(country)||{}).mult,
-    landmark: p.capital || devLvl>=3, walls: p.capital || devLvl>=3,
+    isPlayer, ownerColor, ownerName, ownerCulture: isPlayer ? cultureOfCountry(S.homeName) : null, buildings, devLevel:devLvl, devName: isPlayer ? SETTLE_NAMES[settle] : DEV_LEVELS[devLvl][1], profile:(profileOf(country)||{}).mult,
+    landmark: isPlayer ? settle>=2 : (p.capital || devLvl>=3), walls: isPlayer ? settle>=2 : (p.capital || devLvl>=3),
+    // ours: no ready-made fields (every field is one we built), 3–5 cottages that grow with each upgrade, felled woods stay felled
+    noFields: isPlayer, houses: isPlayer ? [3 + hashStr(p.id) % 3, 11, 22, 22][settle] : null, settle, cleared: isPlayer ? (S.cleared[p.id]||[]) : [],
     army: troops, vehicles: S.currentEra==='2014' ? Math.min(3, Math.ceil(S.tankCount/3)) : Math.min(3, Math.floor(troops/15000)) };
 }
 
@@ -3492,7 +3585,7 @@ async function enterRegion(name){
   try{
     getRegionView();
     regionView.battleSource = regionBattleState;
-    const sig = name + '|' + info.era + '|' + info.ownerColor + '|' + info.buildings.map(b => b.type + b.x.toFixed(1)).join(',')
+    const sig = name + '|' + info.era + '|' + info.ownerColor + '|' + info.settle + '|' + info.cleared.length + '|' + info.buildings.map(b => b.type + b.x.toFixed(1)).join(',')
       + '|' + Math.round(info.army/400) + '|' + (regionBattleState(name) ? 'battle' : '');
     if(sig !== regionSig || !regionView.scene){ regionView.build(info); regionSig = sig; }
     regionView.setLighting(currentSky());
@@ -3505,9 +3598,12 @@ async function enterRegion(name){
   document.body.classList.toggle('region-own', !!ri.isPlayer);
   if(ri.isPlayer && buildType) regionView.setGhost(buildType);
   document.getElementById('rhName').textContent = ri.displayName;
-  document.getElementById('rhSub').textContent = ri.devName + ' · ' + ri.biomeLabel + ' · ' + CULTURE_TR[ri.culture] + ' · ' + ri.era + ' · ' + ri.ownerName + (specOf(name)? ' · ' + SPECS[specOf(name)].icon + ' ' + SPECS[specOf(name)].name + ' bölgesi' : '');
-  regionView.activate();
+  document.getElementById('rhSub').textContent = regionSubtitle(name, ri);
+  regionView.activate(); refreshUpgradeUI();
   fadeView(false); _viewBusy = false;
+}
+function regionSubtitle(name, ri){
+  return ri.devName + ' · ' + ri.biomeLabel + ' · ' + CULTURE_TR[ri.culture] + ' · ' + ri.era + ' · ' + ri.ownerName + (specOf(name)? ' · ' + SPECS[specOf(name)].icon + ' ' + SPECS[specOf(name)].name + ' bölgesi' : '');
 }
 function exitRegion(){
   if(view !== 'region' || _viewBusy) return;
@@ -3606,7 +3702,22 @@ function regionLegal(type, rx, rz){
   if(!p || p.id!==regionName || !ownsProv(p.id)) return false;   // build inside this province only
   if(colonyAt(wx, wz) && (type==='port'||type==='shipyard'||type==='mine')) return false;
   if(type==='mine' && !resourceAtXZ(wx, wz)) return false;
-  return S.money>=(COSTS[type]||0) && (type!=='city'||S.bread>=CITY_BREAD_COST) && (type!=='town'||S.bread>=TOWN_BREAD_COST);
+  return S.money>=(COSTS[type]||0) && S.wood>=woodCost(type) && (type!=='city'||S.bread>=CITY_BREAD_COST) && (type!=='town'||S.bread>=TOWN_BREAD_COST);
+}
+// why the preview is red, in words
+function regionWhy(type, g){
+  if(g.why==='forest') return '🌲 Burada orman var — önce ağaçlara tıklayıp odunlarını topla, sonra inşa et.';
+  if(g.why==='field') return '🌾 Bir tarlanın üstüne gelemez — biraz kaydır.';
+  if(g.why==='building') return '🏠 Başka bir yapıyla birleşiyor — boş bir yer seç.';
+  if(g.why==='coast') return '⚓ Liman ve iskele kıyıya, derin suyun hemen yanına kurulur.';
+  if(g.why==='ground') return '⚠️ Zemin uygun değil — düz, kuru ve yoldan uzak bir yer seç.';
+  const [wx, wz]=regionToWorld(g.x, g.z), p=provAt(wx, wz);
+  if(!p || p.id!==regionName || !ownsProv(p.id)) return '⚠️ Yalnızca bu bölgenin sınırları içine inşa edebilirsin.';
+  if(type==='mine' && !resourceAtXZ(wx, wz)) return '⛏️ Burada maden yatağı yok.';
+  if(colonyAt(wx, wz) && (type==='port'||type==='shipyard'||type==='mine')) return '⚠️ Sömürgeye liman, tersane ve maden kurulamaz.';
+  if(S.money<(COSTS[type]||0)) return '💰 Yetersiz para: '+b_label(type)+' '+COSTS[type]+' tutuyor.';
+  if(S.wood<woodCost(type)) return '🪵 Yetersiz odun: '+b_label(type)+' için '+woodCost(type)+' odun gerekli (elinde '+Math.floor(S.wood)+').';
+  return '⚠️ Buraya inşa edilemez.';
 }
 const ndcOf=e=>{ const r=renderer.domElement.getBoundingClientRect(); return [((e.clientX-r.left)/r.width)*2-1, -((e.clientY-r.top)/r.height)*2+1]; };
 let regionDown=null;
@@ -3643,15 +3754,53 @@ renderer.domElement.addEventListener('pointerup', e=>{
   if(view!=='region' || e.button!==0 || !regionDown) return;
   const moved=Math.hypot(e.clientX-regionDown.x, e.clientY-regionDown.y); regionDown=null;
   if(moved>6) return;
-  if(!buildType){ const r=regionBuildingAt(e); if(r) openRegionBuilding(r); return; }
+  if(!buildType){ const r=regionBuildingAt(e); if(r){ hideWoodPop(); openRegionBuilding(r); return; } offerWood(e); return; }
   if(!regionView.ghost) return;
   const g=regionView.updateGhost(...ndcOf(e), (x,z)=>regionLegal(buildType, x, z)); if(!g) return;
-  if(!g.fits){ hintEl.textContent = (buildType==='port'||buildType==='shipyard'||buildType==='fishery') ? '⚠️ Liman ve tersane kıyıya, derin suyun hemen yanına kurulur.' : '⚠️ Buraya sığmıyor — düz ve boş bir yer seç (yol, nehir, başka bina olmasın).'; return; }
+  if(!g.ok){ hintEl.textContent=regionWhy(buildType, g); return; }   // red preview: nothing gets built
   const [wx, wz]=regionToWorld(g.x, g.z), before=placedBuildings.length, type=buildType;
   placeBuilding({ x:wx, z:wz }, { fromRegion:true });
-  if(placedBuildings.length>before){ regionView.addBuilding(type, g.x, g.z); regionSig=null; }
+  if(placedBuildings.length>before){ regionView.addBuilding(type, g.x, g.z, g.rot); regionSig=null; }
 });
-document.querySelectorAll('.bopt').forEach(b=>b.addEventListener('click', ()=>{ if(view==='region' && regionView) regionView.setGhost(document.body.classList.contains('region-own') ? buildType : null); }));
+
+// ---- woodcutting: click a wood in one of our regions → the villagers fell it (5 s) → wood (1810) / cleared land
+const woodPop=document.getElementById('woodPop');
+let woodPick=null;
+function hideWoodPop(){ woodPop.classList.remove('show'); woodPick=null; if(regionView) regionView.highlightTrees(null); }
+function offerWood(e){
+  hideWoodPop();
+  if(!regionView || !regionView.info || !regionView.info.isPlayer) return;
+  const g=regionView.pickGround(...ndcOf(e)); if(!g) return;
+  const trees=regionView.forestAt(g.x, g.z); if(!trees) return;
+  if((regionView.jobs||[]).length>=3){ hintEl.textContent='🪓 Oduncuların hepsi şu an çalışıyor — biraz bekle.'; return; }
+  woodPick={ trees, prov:regionName };
+  regionView.highlightTrees(trees);
+  const wood=trees.length*WOOD_PER_TREE, is1810=S.currentEra==='1810';
+  document.getElementById('woodPopTitle').textContent=is1810? '🌲 Orman · '+trees.length+' ağaç' : '🌲 Koru · '+trees.length+' ağaç';
+  document.getElementById('woodPopBtn').innerHTML=is1810? '🪓 Odun topla <b>+'+wood+' 🪵</b>' : '🪓 Ağaçları kes, alanı aç';
+  const r=renderer.domElement.getBoundingClientRect();
+  woodPop.style.left=Math.min(r.width-230, Math.max(8, e.clientX-r.left+12))+'px'; woodPop.style.top=Math.min(r.height-110, Math.max(8, e.clientY-r.top-20))+'px';
+  woodPop.classList.add('show');
+}
+document.getElementById('woodPopBtn').onclick=()=>{
+  if(!woodPick || !regionView || regionName!==woodPick.prov) return hideWoodPop();
+  const { trees, prov }=woodPick; regionView.highlightTrees(null);
+  const job=regionView.startChop(trees, 5, felled=>{
+    const n=felled.length, list=S.cleared[prov]||(S.cleared[prov]=[]);
+    for(const t of felled) list.push(treeKey(t.x, t.z));
+    regionSig=null;   // the next visit rebuilds with the stumps
+    if(S.currentEra==='1810'){ S.wood+=n*WOOD_PER_TREE; updateWood(); hintEl.textContent='🪵 +'+(n*WOOD_PER_TREE)+' odun toplandı (toplam '+Math.floor(S.wood)+'). Açılan alana inşa edebilirsin.'; if(job) job.woodText='+'+(n*WOOD_PER_TREE)+' 🪵'; }
+    else { hintEl.textContent='🌲 '+n+' ağaç kesildi; alan inşaata açıldı.'; if(job) job.woodText='Alan açıldı'; }
+  });
+  woodPop.classList.remove('show'); woodPick=null;
+  if(job) hintEl.textContent='🪓 Oduncular ormana gidiyor…';
+};
+document.getElementById('woodPopClose').onclick=()=>hideWoodPop();
+document.querySelectorAll('.bopt').forEach(b=>b.addEventListener('click', ()=>{
+  if(view!=='region' || !regionView) return;
+  regionView.setGhost(document.body.classList.contains('region-own') ? buildType : null);
+  if(buildType) buildPanel.classList.remove('open');   // the menu would cover the ground we are about to build on (B opens it again)
+}));
 
 // battle state for the region close-up (the world-map battle drives it; the result stays visible for a while)
 let lastBattle=null;
@@ -3670,9 +3819,10 @@ function regionBattleState(name){
 // instant switch back (menu exit, load, game over)
 function leaveRegionNow(){
   if(view !== 'region') return;
-  hideProvince(); regionView.setGhost(null); regionView.deactivate(); view = 'world'; document.body.classList.remove('in-region', 'region-own');
+  hideProvince(); hideWoodPop(); regionView.setGhost(null); regionView.deactivate(); view = 'world'; document.body.classList.remove('in-region', 'region-own');
 }
 document.getElementById('rhBack').onclick = () => exitRegion();
+document.getElementById('rhUpgrade').onclick = () => upgradeSettlement(regionName);
 document.getElementById('regionBtn').onclick = () => {
   const n = provAtScreen(0, 0) || S.homeName;
   if(n) enterRegion(n); else hintEl.textContent = 'Önce haritada bir ülkeyi ekranın ortasına getir.';
@@ -3691,7 +3841,7 @@ function savedTroops(){
 }
 function collectState(){
   return {
-    ...pick(S, ['money','moneyCap','population','popCap','army','iron','tankCount','bread','taxPerPerson','ideology','personality','gameDays',
+    ...pick(S, ['money','moneyCap','population','popCap','army','iron','tankCount','bread','wood','settle','cleared','taxPerPerson','ideology','personality','gameDays',
       'fieldCount','farmCount','chocoCount','shipCount','portShipyardCount','cityCount','townCount','baseCount','nonChocoBuildings',
       'homeName','selectedName','troops','goods','fed','spec']),
     troops: savedTroops(),
@@ -3721,6 +3871,7 @@ function clearWorldObjects(){
   S.fieldCount=S.farmCount=S.chocoCount=S.shipCount=S.portShipyardCount=S.cityCount=S.townCount=S.baseCount=S.nonChocoBuildings=0;
   S.freeCityCount=0;
   S.bankCount=0; S.moneyCap=5000; S.iron=0; S.tankCount=0;
+  S.wood=0; S.settle={}; S.cleared={};
   S.money=2500; S.bread=0; S.taxPerPerson=2; S.gameDays=0; S.lastMonthCounted=0; S.rebellionActive=false; S.ideology=null; S.personality=null; S._upkeepDebt=0;
   if(typeof rebelFires!=='undefined'){ rebelFires.forEach(fo=>{ if(fo.group) worldGroup.remove(fo.group); }); rebelFires=[]; }
   const dv=document.getElementById('dangerVignette'); if(dv) dv.classList.remove('show');
@@ -3738,6 +3889,7 @@ function applyState(st){
   clearWorldObjects();
   S.money=st.money; S.moneyCap=st.moneyCap||5000; S.population=st.population; S.popCap=st.popCap; S.army=st.army;
   S.iron=st.iron||0; S.tankCount=st.tankCount||0;
+  S.wood=st.wood||0; S.settle={ ...(st.settle||{}) }; S.cleared={ ...(st.cleared||{}) };
   S.bread=st.bread||0; S.taxPerPerson=(st.taxPerPerson!=null?st.taxPerPerson:2); S.ideology=st.ideology||null;
   S.personality=st.personality||null;
   S.gameDays=st.gameDays||0;
@@ -3770,7 +3922,11 @@ function applyState(st){
   } else if(S.homeName) spawnBots(10);
   redrawBorders();
   // rebuild buildings (silent: no cost charged, counters incremented inside)
-  (st.buildings||[]).forEach(b=>{ if(b.freeCity) S._spawnFreeCity=true; spawnBuilding(b.type, b.x, b.z, b.mineral, true); });
+  // (older saves had city/town buildings: they become the settlement level of their province; the population cap is saved as it was)
+  (st.buildings||[]).forEach(b=>{
+    if(b.type==='city' || b.type==='town'){ const pv=provAt(b.x, b.z); if(pv) S.settle[pv.id]=Math.max(S.settle[pv.id]||0, b.type==='city'? 2 : 1); return; }
+    spawnBuilding(b.type, b.x, b.z, b.mineral, true); });
+  recountSettlements(); updateWood();
   // re-create ships at saved positions
   (st.shipPositions||[]).forEach(p=>{ const s=makeShip(S.currentEra); s.position.set(p[0],SHIP_Y,p[1]); worldGroup.add(s); ships.push(s); });
   S.shipCount=ships.length;
@@ -3869,6 +4025,8 @@ if (new URLSearchParams(location.search).has('test')) {
     give(k, n){ goodAdd(k, n); },
     profile(c){ return profileOf(c); },
     regionPlaced(){ return regionView && regionView.placed.slice(); },
+    get rv(){ return regionView; }, get regionName(){ return regionName; }, upgrade(id){ return upgradeSettlement(id); }, settleOf(id){ return settleOf(id); },
+    myProvIds(){ return myProvs().map(p=>p.id); }, wood(){ return S.wood; },
     // aim the region camera at a moving vehicle / person (index i) or a point, for close-up screenshots
     regionFocus(what, zoom, i=0, pitch=0){
       const rv=regionView; if(!rv || !rv.life) return false;

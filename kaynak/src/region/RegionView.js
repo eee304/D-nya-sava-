@@ -6,7 +6,8 @@ import { clamp, lerp, makeRng, hashStr, along, polyLen } from './noise.js';
 import { BIOMES, biomeFor, cultureFor } from './biomes.js';
 import { buildTerrain, paintGround, waterNormals, outerGround, SIZE, HALF, N } from './terrain.js';
 import { addVegetation, addOuterTrees } from './vegetation.js';
-import { addGroundCover, addTownProps, windTick } from './details.js';
+import { addGroundCover, addTownProps, addCrops, addFences, windTick } from './details.js';
+import { makeHuman, humanName } from '../units/humans.js';
 import { Life } from './life.js';
 import { floraFor } from './flora.js';
 import { Formation } from '../units/Formation.js';
@@ -16,10 +17,15 @@ import {
   flagTexture, makeFlag, makeWindmill, makeShip, animalGeo, ANIMAL_MAT, fishingBoat, pumpjack, box, cyl,
 } from './builders.js';
 import { setWindowGlow } from './textures.js';
+import { RIGS } from './prefabs.js';
 
 const VIEW_H = 40;            // world units visible vertically at zoom 1
 const CAM_OFFSET = new THREE.Vector3(80, 76, 80);
 export const REGION_MIN_ZOOM = .42;   // far enough out to overlook the whole province
+const GHOST_OK = '#4aa8ff', GHOST_BAD = '#ff4f45';   // placement preview: blue = fits, red = cannot be built
+const FIELD_COLORS = ['#c3a24a', '#7f9a3c', '#b8933f', '#9aa646', '#c9ac57', '#8c8a3a', '#a9a248'];   // same as the painted ground (terrain.js)
+export const treeKey = (x, z) => x.toFixed(2) + ',' + z.toFixed(2);
+const RIGS_HAVE = n => !!RIGS[n];
 
 export class RegionView {
   constructor(renderer, { keys, labelsEl, onExit, post, env }) {
@@ -43,6 +49,7 @@ export class RegionView {
 
   // Build the scene for a country. Heavy (~0.5–1.5 s); call behind a loading overlay.
   build(info) {
+    if (this.scene && this.jobs) this.finishJobs();   // woodcutters still at work: their wood arrives now
     this.dispose(); this._base = null; this._wallR = 0;
     this.info = info;
     const rng = makeRng(hashStr(info.name + '|' + info.era));
@@ -71,7 +78,6 @@ export class RegionView {
 
     // player fields become painted fields in the layout
     const T = buildTerrain(info, B, rng);
-    for (const b of info.buildings) if (b.type === 'field') T.FIELDS.push([b.x, b.z, 6, 5, Math.atan2(b.x, b.z)]);
     this.T = T;
 
     // ---- occupancy for placement
@@ -94,6 +100,8 @@ export class RegionView {
         if (dd < bd) { bd = dd; ang = Math.atan2(dx, dz); }
       } return ang;
     };
+    // the player's fields, turned the way their preview was (along the nearest road)
+    for (const b of info.buildings) if (b.type === 'field') T.FIELDS.push([b.x, b.z, 6, 5, -roadAngle(b.x, b.z)]);
 
     const K = new Kit(), patches = []; K.hi = true;
     this.flags = []; this.blades = []; this.ships = []; this.basePos = null; this.forms = []; this.battle = null;
@@ -108,10 +116,10 @@ export class RegionView {
     }
     obstacles.push([0, 0, 3.8]);
     const rural = (info.devLevel ?? 2) <= 1;
-    const town = (K, cx, cz, radius, count) => {
+    const town = (K, cx, cz, radius, count, scale = 1) => {
       let placed = 0;
       for (let i = 0; i < count * 18 && placed < count; i++) {
-        const a = rng() * Math.PI * 2, r = 3 + Math.pow(rng(), .8) * radius, x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r, s = .85 + rng() * .45;
+        const a = rng() * Math.PI * 2, r = 3 + Math.pow(rng(), .8) * radius, x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r, s = (.85 + rng() * .45) * scale;
         if (!freeSpot(x, z, 1.1 * s)) continue;
         const fr = house(K, x, T.H(x, z), z, roadAngle(x, z) + (rng() < .5 ? 0 : Math.PI / 2) + (rng() - .5) * .12, s, culture, era, rng, rural);
         obstacles.push([x, z, fr]); patches.push([x, z, fr * 1.5, .4]); placed++;
@@ -130,8 +138,9 @@ export class RegionView {
     }
 
     // ---- capital houses fill the space left around the landmark and the player's buildings
-    const capCount = [6, 14, 26, 40, 58][info.devLevel ?? 2];
-    town(K, 0, 0, T.townR, capCount);
+    // (the player's provinces: a handful of cottages that grow into a town and a city as they are upgraded)
+    const capCount = info.houses ?? [6, 14, 26, 40, 58][info.devLevel ?? 2];
+    town(K, 0, 0, info.houses != null ? Math.min(T.townR, 4 + capCount * .55) : T.townR, capCount, info.houses != null && info.houses < 6 ? .78 : 1);
 
     // ---- walls (1810 only; huts get a palisade-free village)
     if (era !== '2014' && culture !== 'african' && info.walls !== false) {
@@ -142,10 +151,10 @@ export class RegionView {
       const segs = Math.round(WR * 2 * Math.PI / 1.7);
       for (let i = 0; i < segs; i++) {
         const am = (i + .5) / segs * Math.PI * 2; if (gates.some(g => angDiff(am, g) < .13)) continue;
-        const x = Math.cos(am) * WR, z = Math.sin(am) * WR, y = T.H(x, z); if (y < .3 || T.riverDist(x, z) < 2 || occupied(x, z, .6)) continue;
+        const x = Math.cos(am) * WR, z = Math.sin(am) * WR, y = T.H(x, z); if (y < .3 || T.riverDist(x, z) < 2 || occupied(x, z, .6) || T.inField(x, z, .4)) continue;   // never across a field
         wallSegment(K, x, y, z, am, 2 * WR * Math.sin(Math.PI / segs) + .08, stone, culture);
       }
-      for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2, x = Math.cos(a) * WR, z = Math.sin(a) * WR, y = T.H(x, z); if (y > .3 && !gates.some(g => angDiff(a, g) < .2) && T.riverDist(x, z) > 2) tower(K, x, y, z, stone, roof, culture); }
+      for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2, x = Math.cos(a) * WR, z = Math.sin(a) * WR, y = T.H(x, z); if (y > .3 && !gates.some(g => angDiff(a, g) < .2) && T.riverDist(x, z) > 2 && !T.inField(x, z, 1) && !occupied(x, z, .8)) tower(K, x, y, z, stone, roof, culture); }
       for (const g of gates) for (const sg of [-1, 1]) {
         const a = g + sg * .16, x = Math.cos(a) * WR, z = Math.sin(a) * WR, y = T.H(x, z); if (y < .3) continue;
         gateTower(K, x, y, z, stone, roof, culture);
@@ -156,7 +165,7 @@ export class RegionView {
     scene.add(capFlag.group); this.flags.push(capFlag);
 
     // ---- countryside: windmills (1810) and haystacks near fields
-    if (era !== '2014' && culture === 'european') {
+    if (era !== '2014' && culture === 'european' && !info.isPlayer) {   // (the player's farms bring their own windmill)
       for (const [fx, fz] of T.FIELDS.slice(0, 2)) { const s = findSpot(fx + 5, fz, 1.6); if (s) { const w = makeWindmill(K, s[0], T.H(...s), s[1]); scene.add(w.cap, w.hub); this.blades.push(w.hub); obstacles.push([...s, 1.6]); } }
     }
     for (let i = 0; i < T.FIELDS.length * 2; i++) { const f = T.FIELDS[i % T.FIELDS.length], x = f[0] + (rng() - .5) * f[2] * .6, z = f[1] + (rng() - .5) * f[3] * .6; haystack(K, x, T.H(x, z), z); }
@@ -184,16 +193,20 @@ export class RegionView {
     water.position.y = .02; water.receiveShadow = true; scene.add(water);
 
     // ---- vegetation last, around everything placed
-    const veg = addVegetation(scene, T, B, rng, (x, z, r) => {
-      const h = T.H(x, z); if (h < .45 || h > B.snowAt + 1.5) return false;
-      if (Math.hypot(x, z) < T.townR + 6.5) return false;
-      return T.riverDist(x, z) > 3.2 && T.roadDist(x, z) > 1.6 && !T.inField(x, z, .6) && !occupied(x, z, r) && T.slope(x, z) < 1.2;
-    });
+    // natural forest first; then what has been built over or felled is taken out of it
+    const cut = new Set(info.cleared || []);
+    // (own random stream, and the town's clearing applied afterwards: the town growing never moves a tree)
+    const veg = addVegetation(scene, T, B, makeRng(hashStr(info.name + '|forest')), (x, z) => {
+      const h = T.Hraw(x, z); if (h < .45 || h > B.snowAt + 1.5) return false;
+      return T.riverDist(x, z) > 3.2 && T.roadDist(x, z) > 1.6 && T.slope(x, z) < 1.2;
+    }, (x, z) => cut.has(treeKey(x, z)) ? 'cut' : (Math.hypot(x, z) < T.townR + 6.5 || T.inField(x, z, .6) || occupied(x, z, .4)));
     addOuterTrees(scene, T, B, rng);
     this.treeCount = veg.count; this.veg = veg.items; this.terrain = terrain; this.groundTex = ttex;
+    this.indexTrees(); this.makeStumps(veg.stumps); this.jobs = [];
     this.addIdentity(K, rng, freeSpot);
+    this.cover = [];
     this.tufts = addGroundCover(scene, T, B, info, rng, (x, z) => Math.hypot(x, z) > 4.2 && T.roadDist(x, z) > 1.15 && T.riverDist(x, z) > 1.6
-      && !T.inField(x, z, .15) && !occupied(x, z, .25) && Math.abs(x) < HALF - 1 && Math.abs(z) < HALF - 1);
+      && !T.inField(x, z, .15) && !occupied(x, z, .25) && Math.abs(x) < HALF - 1 && Math.abs(z) < HALF - 1, this.cover);
     // a light haze in the distance gives the region depth
     this.haze = new THREE.Fog('#b9cbd8', 190, 430); scene.fog = this.haze;
     K.flush(scene);
@@ -386,32 +399,187 @@ export class RegionView {
   }
 
   // ---- building directly in the region view ----
-  addBuilding(type, x, z) {
+  addBuilding(type, x, z, rot = 0) {
     if (!this.scene) return false;
     const r = this._ctx.typeR[type] || 3;
-    this.clearTrees(x, z, r + 1.2);
-    if (type === 'field') { this.paintField(x, z); this.placed.push(type); return true; }
+    if (type === 'field') { this.addField(x, z, -rot); this.placed.push(type); return true; }
+    this.clearTrees(x, z, r + .4); this.clearCover((px, pz) => Math.hypot(px - x, pz - z) < r * .8);
     const K = new Kit(), ok = this.placeModel(K, { type, x, z }, true);
     K.flush(this.scene); this.hearths.push(...K.smoke);
     return ok;
   }
   clearTrees(x, z, r) {
     const zero = new THREE.Matrix4().makeScale(0, 0, 0), touched = new Set();
-    for (const it of this.veg || []) if (Math.hypot(it.x - x, it.z - z) < r) for (const m of it.meshes) { m.setMatrixAt(it.i, zero); touched.add(m); }
+    for (const it of this.veg || []) if (!it.dead && Math.hypot(it.x - x, it.z - z) < r) { it.dead = true; for (const m of it.meshes) { m.setMatrixAt(it.i, zero); touched.add(m); } }
     for (const m of touched) m.instanceMatrix.needsUpdate = true;
   }
-  paintField(x, z) {
-    const cv = this.groundCanvas, ctx = cv.getContext('2d'), S = cv.width, w = 6, h = 5, a = Math.atan2(x, z);
+  // hide grass tufts, flowers and pebbles where something new now stands
+  clearCover(test) {
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (const { m, list } of this.cover || []) {
+      if (!m) continue; let any = false;
+      list.forEach((p, i) => { if (!p.gone && test(p.x, p.z)) { p.gone = true; m.setMatrixAt(i, zero); any = true; } });
+      if (any) m.instanceMatrix.needsUpdate = true;
+    }
+  }
+  // a new field looks exactly like the ones the countryside is generated with: painted strip, crop rows, fence, haystacks
+  addField(x, z, a) {
+    const T = this._ctx.T, cv = this.groundCanvas, ctx = cv.getContext('2d'), S = cv.width, w = 6, h = 5, n = T.FIELDS.length;
+    const f = [x, z, w, h, a];
     ctx.setTransform(S / SIZE, 0, 0, S / SIZE, S / 2, S / 2); ctx.translate(x, z); ctx.rotate(a);
-    ctx.fillStyle = '#b8933f'; ctx.fillRect(-w / 2, -h / 2, w, h);
+    ctx.fillStyle = FIELD_COLORS[n % 7]; ctx.fillRect(-w / 2, -h / 2, w, h);
     ctx.strokeStyle = 'rgba(70,55,25,.35)'; ctx.lineWidth = .09;
     for (let k = -w / 2 + .2; k < w / 2; k += .32) { ctx.beginPath(); ctx.moveTo(k, -h / 2 + .1); ctx.lineTo(k, h / 2 - .1); ctx.stroke(); }
     ctx.strokeStyle = 'rgba(60,80,30,.8)'; ctx.lineWidth = .25; ctx.strokeRect(-w / 2, -h / 2, w, h);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.groundTex.needsUpdate = true;
-    this._ctx.T.FIELDS.push([x, z, w, h, a]);
+    T.FIELDS.push(f);
+    const inF = (px, pz, m = .15) => { const dx = px - x, dz = pz - z, c = Math.cos(-a), s = Math.sin(-a); return Math.abs(dx * c - dz * s) < w / 2 + m && Math.abs(dx * s + dz * c) < h / 2 + m; };
+    this.clearCover((px, pz) => inF(px, pz));
+    for (const it of this.veg || []) if (!it.dead && !it.tree && inF(it.x, it.z, .4)) this.clearTrees(it.x, it.z, .05);   // bushes
+    addCrops(this.scene, T, this.info, Math.random, [f], n);
+    const K = new Kit(); addFences(K, T, [f], n);
+    for (let i = 0; i < 2; i++) { const u = (Math.random() - .5) * w * .6, v = (Math.random() - .5) * h * .6, hx = x + u * Math.cos(a) - v * Math.sin(a), hz = z + u * Math.sin(a) + v * Math.cos(a); haystack(K, hx, T.H(hx, hz), hz); }
+    K.flush(this.scene);
   }
-  // translucent preview that follows the cursor; green = can build, red = cannot
+
+  // ---- trees: a grid index of the living ones, for placement checks and woodcutting ----
+  indexTrees() {
+    this.treeGrid = new Map();
+    for (const it of this.veg || []) if (it.tree) { const k = Math.floor(it.x / 4) + ',' + Math.floor(it.z / 4); if (!this.treeGrid.has(k)) this.treeGrid.set(k, []); this.treeGrid.get(k).push(it); }
+  }
+  treesNear(x, z, r) {
+    const out = [], c0 = Math.floor((x - r) / 4), c1 = Math.floor((x + r) / 4), d0 = Math.floor((z - r) / 4), d1 = Math.floor((z + r) / 4);
+    for (let cx = c0; cx <= c1; cx++) for (let cz = d0; cz <= d1; cz++) for (const it of this.treeGrid.get(cx + ',' + cz) || []) if (!it.dead && !it.busy && Math.hypot(it.x - x, it.z - z) < r) out.push(it);
+    return out;
+  }
+  hasTree(x, z, r) {
+    const c0 = Math.floor((x - r) / 4), c1 = Math.floor((x + r) / 4), d0 = Math.floor((z - r) / 4), d1 = Math.floor((z + r) / 4);
+    for (let cx = c0; cx <= c1; cx++) for (let cz = d0; cz <= d1; cz++) for (const it of this.treeGrid.get(cx + ',' + cz) || []) if (!it.dead && Math.hypot(it.x - x, it.z - z) < r) return true;
+    return false;
+  }
+  // the wood the player clicked on: trees linked to each other (a few metres apart), up to a sensible size
+  forestAt(x, z) {
+    const near = this.treesNear(x, z, 1.8); if (!near.length) return null;
+    const start = near.sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0];
+    const seen = new Set([start]), queue = [start];
+    while (queue.length && seen.size < 40) {
+      const t = queue.shift();
+      for (const n of this.treesNear(t.x, t.z, 2.6)) if (!seen.has(n) && Math.hypot(n.x - start.x, n.z - start.z) < 11) { seen.add(n); queue.push(n); if (seen.size >= 40) break; }
+    }
+    return [...seen];
+  }
+  // yellow-tinted crowns show which trees an order would fell
+  highlightTrees(list) {
+    const touched = new Set(), c = new THREE.Color();
+    for (const it of this._hl || []) { if (it.col0 && !it.dead) { it.crown.setColorAt(it.i, it.col0); touched.add(it.crown); } }
+    this._hl = list || null;
+    for (const it of list || []) { if (!it.crown.instanceColor) continue; it.crown.getColorAt(it.i, c); it.col0 = c.clone(); it.crown.setColorAt(it.i, c.clone().lerp(new THREE.Color('#ffd84a'), .55)); touched.add(it.crown); }
+    for (const m of touched) if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  }
+  makeStumps(list) {
+    if (this.stumps) { this.scene.remove(this.stumps); this.stumps.geometry.dispose(); }
+    const g = new THREE.CylinderGeometry(.075, .1, .16, 7).translate(0, .06, 0).toNonIndexed(), p = g.attributes.position, col = new Float32Array(p.count * 3), c = new THREE.Color();
+    for (let i = 0; i < p.count; i++) { c.set(p.getY(i) > .13 ? '#c9a46e' : '#5a4330'); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const m = this.stumps = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .95 }), list.length + 600);
+    m.count = 0; m.castShadow = true; m.receiveShadow = true; this.scene.add(m);
+    for (const t of list) this.addStump(t.x, t.z, t.s, t.r);
+  }
+  addStump(x, z, s = 1, r = 0) {
+    const m = this.stumps; if (!m || m.count >= m.instanceMatrix.count) return;
+    const o = this._so || (this._so = new THREE.Object3D());
+    o.position.set(x, this.T.H(x, z) - .02, z); o.rotation.set(0, r, 0); o.scale.setScalar(s); o.updateMatrix();
+    m.setMatrixAt(m.count++, o.matrix); m.instanceMatrix.needsUpdate = true;
+  }
+
+  // woodcutters walk out to the trees, chop for `secs` seconds, the trees fall, then onDone(trees) and they go home
+  startChop(trees, secs, onDone) {
+    if (!this.scene || !trees.length) return null;
+    const T = this.T, info = this.info;
+    for (const t of trees) t.busy = true;
+    let cx = 0, cz = 0; for (const t of trees) { cx += t.x; cz += t.z; } cx /= trees.length; cz /= trees.length;
+    // where they come from: the nearest road, else straight from the village
+    let sp = null, sd = 1e9;
+    for (const r of T.ROADS) for (let s0 = 0, L = polyLen(r); s0 < L; s0 += 2) { const q = along(r, s0), d = Math.hypot(q.x - cx, q.z - cz); if (d < sd && T.H(q.x, q.z) > .3) { sd = d; sp = [q.x, q.z]; } }
+    if (!sp || sd > 16) { const d = Math.hypot(cx, cz) || 1, k = Math.max(0, d - 12) / d; sp = [cx * k, cz * k]; }
+    const edge = trees.slice().sort((a, b) => Math.hypot(a.x - sp[0], a.z - sp[1]) - Math.hypot(b.x - sp[0], b.z - sp[1]));
+    const n = Math.max(2, Math.min(4, Math.ceil(trees.length / 8))), workers = [];
+    const pick = a => a[Math.floor(Math.random() * a.length)];
+    for (let i = 0; i < n; i++) {
+      const tree = edge[Math.min(edge.length - 1, i * 2)], name = humanName('worker', info.era, info.culture), h = makeHuman(RIGS_HAVE(name) ? name : humanName('civ', info.era, info.culture), {
+        team: pick(info.era === '2014' ? ['#c8463a', '#3f6fa8', '#e07a2a', '#5a8a4a'] : ['#6b4a32', '#8a3a28', '#3f5a3a', '#c9b48a', '#a85a3a']),
+        pants: pick(info.era === '2014' ? ['#2f4a6a', '#3a3a3e', '#6b5a48'] : ['#4a3a2a', '#5e4630', '#3a3836', '#6b5236']), skin: pick(['#f2cfb0', '#e0b48c', '#c99470', '#9a6a48']) });
+      if (!h) continue;
+      const dx = tree.x - sp[0], dz = tree.z - sp[1], dl = Math.hypot(dx, dz) || 1;
+      const st = { x: tree.x - dx / dl * .55, z: tree.z - dz / dl * .55 };   // stand just in front of the trunk
+      const ox = (Math.random() - .5) * 1.2, oz = (Math.random() - .5) * 1.2;
+      h.g.scale.setScalar(.52); h.g.position.set(sp[0] + ox, T.H(sp[0] + ox, sp[1] + oz), sp[1] + oz); this.scene.add(h.g);
+      workers.push({ h, x: sp[0] + ox, z: sp[1] + oz, st, tree, home: [sp[0] + ox, sp[1] + oz], yaw: Math.atan2(dx, dz), ph: Math.random() * 6 });
+    }
+    const label = document.createElement('div'); label.className = 'rl chop'; this.labelsEl.appendChild(label);
+    const job = { trees, workers, secs, onDone, phase: 'walk', t: 0, fall: 0, label, sp, pos: new THREE.Vector3(cx, T.H(cx, cz) + 3.2, cz) };
+    this.labels.push({ el: label, pos: job.pos });
+    this.jobs.push(job);
+    return job;
+  }
+  // finish every job at once (leaving the region): the wood still arrives
+  finishJobs() {
+    for (const j of this.jobs || []) { if (j.phase === 'walk' || j.phase === 'chop' || j.phase === 'fall') this.fellNow(j); this.endJob(j); }
+    this.jobs = [];
+  }
+  fellNow(j) {
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0), touched = new Set();
+    for (const t of j.trees) { if (t.dead) continue; t.dead = true; t.busy = false; for (const m of t.meshes) { m.setMatrixAt(t.i, zero); touched.add(m); } this.addStump(t.x, t.z, t.s, t.r); }
+    for (const m of touched) m.instanceMatrix.needsUpdate = true;
+    if (j.phase !== 'home') { j.phase = 'home'; j.onDone && j.onDone(j.trees); }
+  }
+  endJob(j) {
+    for (const w of j.workers) { this.scene && this.scene.remove(w.h.g); }
+    j.workers = []; j.label.remove(); this.labels = this.labels.filter(l => l.el !== j.label); j.phase = 'gone';
+  }
+  updateJobs(dt) {
+    if (!this.jobs || !this.jobs.length) return;
+    const T = this.T, q1 = new THREE.Quaternion(), q2 = new THREE.Quaternion(), ax = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), o = this._fo || (this._fo = new THREE.Object3D());
+    for (const j of this.jobs) {
+      j.t += dt;
+      if (j.phase === 'walk' && (j.workers.every(w => w.arrived) || j.t > 14)) { j.phase = 'chop'; j.t = 0; }
+      if (j.phase === 'chop' && j.t >= j.secs) { j.phase = 'fall'; j.t = 0; }
+      if (j.phase === 'fall') {   // trees topple one after another, away from the cutters
+        const touched = new Set();
+        j.trees.forEach((t, i) => {
+          if (t.dead) return;
+          const k = clamp((j.t - i * .025) / 1.1, 0, 1), e = k * k;
+          let dx = t.x - j.sp[0], dz = t.z - j.sp[1]; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+          ax.set(dz, 0, -dx); q1.setFromAxisAngle(ax, e * 1.45); q2.setFromAxisAngle(up, t.r);
+          o.position.set(t.x, t.y, t.z); o.quaternion.multiplyQuaternions(q1, q2); o.scale.setScalar(t.s * (k >= 1 ? 0 : 1)); o.updateMatrix();
+          for (const m of t.meshes) { m.setMatrixAt(t.i, o.matrix); touched.add(m); }
+          if (k >= 1) { t.dead = true; t.busy = false; this.addStump(t.x, t.z, t.s, t.r); if (this.fx && i % 3 === 0) this.fx.puff(t.x + dx * 1.2, T.H(t.x, t.z) + .2, t.z + dz * 1.2, .5, 1.6, '#b8a888', .45); }
+        });
+        for (const m of touched) m.instanceMatrix.needsUpdate = true;
+        if (j.trees.every(t => t.dead)) { j.phase = 'home'; j.t = 0; j.onDone && j.onDone(j.trees); }
+      }
+      j.label.textContent = j.phase === 'walk' ? '🪓 Oduncular yolda…' : j.phase === 'chop' ? '🪓 Odun toplanıyor · ' + Math.ceil(j.secs - j.t) + ' sn' : j.phase === 'fall' ? '🌲 Ağaçlar devriliyor…' : j.woodText || '';
+      if (j.phase === 'home' && j.t > 2.2) j.label.style.opacity = Math.max(0, 1 - (j.t - 2.2) / .8);
+      for (const w of j.workers) {
+        let tx, tz, moving = false;
+        if (j.phase === 'walk') { tx = w.st.x; tz = w.st.z; } else if (j.phase === 'home') { tx = w.home[0]; tz = w.home[1]; } else { tx = w.x; tz = w.z; }
+        const dx = tx - w.x, dz = tz - w.z, d = Math.hypot(dx, dz);
+        if (d > .06) { const s = Math.min(d, 1.4 * dt); w.x += dx / d * s; w.z += dz / d * s; moving = true; const want = Math.atan2(dx, dz); w.yaw += Math.atan2(Math.sin(want - w.yaw), Math.cos(want - w.yaw)) * Math.min(1, dt * 6); }
+        else if (j.phase === 'walk') w.arrived = true;
+        if (!moving && (j.phase === 'chop' || j.phase === 'fall')) { const want = Math.atan2(w.tree.x - w.x, w.tree.z - w.z); w.yaw += Math.atan2(Math.sin(want - w.yaw), Math.cos(want - w.yaw)) * Math.min(1, dt * 6); }
+        w.h.g.position.set(w.x, T.H(w.x, w.z), w.z); w.h.g.rotation.y = w.yaw;
+        const chopping = j.phase === 'chop' && !moving;
+        w.h.play(moving ? 'walk' : chopping && w.h.acts.chop ? 'chop' : 'idle', dt, moving ? 1.4 / (.36 * .52) : 1);
+        // chips fly at each stroke
+        if (chopping && this.fx && Math.random() < dt * 1.6) this.fx.puff(w.tree.x, T.H(w.tree.x, w.tree.z) + .25, w.tree.z, .12, .9, '#d8b888', .5);
+      }
+      if (j.phase === 'home' && (j.workers.every(w => Math.hypot(w.x - w.home[0], w.z - w.home[1]) < .1) || j.t > 20)) this.endJob(j);
+    }
+    this.jobs = this.jobs.filter(j => j.phase !== 'gone');
+  }
+
+  // translucent preview that follows the cursor; blue = can build, red = cannot
   setGhost(type) {
     if (this.ghost) { this.scene && this.scene.remove(this.ghost); this.ghost = null; }
     this.ghostType = type || null;
@@ -428,13 +596,11 @@ export class RegionView {
     else if (type === 'port' || type === 'shipyard' || type === 'fishery') dock(K, 0, 0, [0, 1], 7);
     else if (type === 'field') g.add(new THREE.Mesh(new THREE.BoxGeometry(6, .15, 5)));
     K.flush(g);
-    this.ghostMat = new THREE.MeshBasicMaterial({ color: '#7dffa8', transparent: true, opacity: .45, depthWrite: false });
+    this.ghostMat = new THREE.MeshBasicMaterial({ color: GHOST_OK, transparent: true, opacity: .45, depthWrite: false });
     g.traverse(o => { if (o.isMesh) { o.material = this.ghostMat; o.castShadow = false; o.receiveShadow = false; } });
-    const R = typeR[type] || 3, ring = new THREE.Mesh(new THREE.RingGeometry(R, R + .25, 40).rotateX(-Math.PI / 2), this.ghostMat);
-    ring.position.y = .08; g.add(ring);
+    if (type !== 'field') { const R = typeR[type] || 3, ring = new THREE.Mesh(new THREE.RingGeometry(R, R + .25, 40).rotateX(-Math.PI / 2), this.ghostMat); ring.position.y = .08; g.add(ring); }
     g.visible = false; this.ghost = g; this.scene.add(g);
   }
-  // move the preview to the terrain under the cursor; legal(x,z) asks the game rules
   // ground point under the cursor (region coordinates) or null
   pickGround(ndcX, ndcY) {
     if (!this.terrain) return null;
@@ -442,21 +608,37 @@ export class RegionView {
     const hit = ray.intersectObject(this.terrain, false)[0];
     return hit ? { x: hit.point.x, z: hit.point.z } : null;
   }
+  // can `type` stand at (x,z) turned by rot? -> null if yes, else why not ('forest' | 'field' | 'building' | 'ground' | 'coast')
+  blockedFootprint(type, x, z, rot) {
+    const { T, typeR, occupied } = this._ctx, R = typeR[type] || 3;
+    if (Math.abs(x) > HALF - 5 || Math.abs(z) > HALF - 5) return 'ground';
+    if (type === 'port' || type === 'shipyard' || type === 'fishery') {   // must stand on the shore with deep water close by
+      const ok = T.H(x, z) > .2 && T.H(x, z) < 1.4 && [...Array(16)].some((_, i) => { const a = i / 16 * Math.PI * 2; return T.H(x + Math.cos(a) * 6, z + Math.sin(a) * 6) < -.5; });
+      return !ok ? 'coast' : occupied(x, z, 1.6) ? 'building' : this.hasTree(x, z, 1.8) ? 'forest' : null;
+    }
+    // sample the whole footprint: a 6×5 rectangle for fields, a disc for buildings
+    const pts = [];
+    if (type === 'field') { const c = Math.cos(rot), s = Math.sin(rot); for (let u = -3; u <= 3.01; u += 1) for (let v = -2.5; v <= 2.51; v += 1.25) pts.push([x + u * c + v * s, z - u * s + v * c]); }
+    else { pts.push([x, z]); for (let k = 0; k < 2; k++) for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2, rr = R * (k ? .85 : .45); pts.push([x + Math.cos(a) * rr, z + Math.sin(a) * rr]); } }
+    for (const [px, pz] of pts) {
+      if (T.H(px, pz) < .4 || T.slope(px, pz) > .8 || T.riverDist(px, pz) < 1.2 || T.roadDist(px, pz) < 1.2) return 'ground';
+      if (T.inField(px, pz, .2)) return 'field';
+      if (occupied(px, pz, .3)) return 'building';
+      if (this.hasTree(px, pz, .75)) return 'forest';
+    }
+    return null;
+  }
   updateGhost(ndcX, ndcY, legal) {
     if (!this.ghost) return null;
     const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.cam);
     const hit = ray.intersectObject(this.terrain, false)[0];
     if (!hit) { this.ghost.visible = false; return null; }
-    const { T, typeR, freeSpot, roadAngle } = this._ctx, x = hit.point.x, z = hit.point.z, type = this.ghostType, R = typeR[type] || 3;
-    let fits;
-    if (type === 'port' || type === 'shipyard' || type === 'fishery') {   // must stand on the shore with deep water close by
-      fits = T.H(x, z) > .2 && T.H(x, z) < 1.4 && [...Array(16)].some((_, i) => { const a = i / 16 * Math.PI * 2; return T.H(x + Math.cos(a) * 6, z + Math.sin(a) * 6) < -.5; });
-    } else fits = freeSpot(x, z, R * .8);
-    const ok = fits && legal(x, z);
+    const { T, roadAngle } = this._ctx, x = hit.point.x, z = hit.point.z, type = this.ghostType, rot = roadAngle(x, z);
+    const why = this.blockedFootprint(type, x, z, rot), fits = !why, ok = fits && legal(x, z);
     this.ghost.visible = true;
-    this.ghost.position.set(x, T.H(x, z) + .02, z); this.ghost.rotation.y = roadAngle(x, z);
-    this.ghostMat.color.set(ok ? '#7dffa8' : '#ff6b5e');
-    return { x, z, ok, fits };
+    this.ghost.position.set(x, T.H(x, z) + .02, z); this.ghost.rotation.y = rot;
+    this.ghostMat.color.set(ok ? GHOST_OK : GHOST_BAD);
+    return { x, z, ok, fits, why, rot };
   }
 
   addPort(K, b, rng, patches) {
@@ -540,6 +722,7 @@ export class RegionView {
     this.labelsEl.style.display = '';
   }
   deactivate() {
+    this.finishJobs(); this.highlightTrees(null);
     this.active = false; this.controls.enabled = false;
     this.labelsEl.style.display = 'none';
   }
@@ -623,6 +806,7 @@ export class RegionView {
       if (f.drill) { f.moving = Math.sin(t * .5) > 0; f.group.position.y = this.unitY(f.group.position.x, f.group.position.z); }
       f.update(dt, this.fx);
     }
+    this.updateJobs(dt);
     if (this.fx) this.fx.update(dt);
     for (const b of this.pumps) b.rotation.z = Math.sin(t * 1.6 + b.position.x) * .32;
     for (const b of this.boats) { b.g.position.y = Math.sin(t * 1.4 + b.ph) * .05; b.g.rotation.z = Math.sin(t * 1.1 + b.ph) * .06; if (b.drift) b.g.rotation.y += dt * .03; }

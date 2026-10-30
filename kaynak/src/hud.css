@@ -381,3 +381,25 @@ body.in-region #provPanel.in-rv { top: 214px; max-height: calc(100% - 310px); ov
 #cancelOpBtn:hover { background: #a8342a; }
 #cancelOpBtn.show { display: block; }
 body.in-region #cancelOpBtn, body.cinematic #cancelOpBtn { display: none !important; }
+
+/* ---- era differences: 1810 has wood and cannons, 2014 technology, tanks and factories */
+body:not([data-era="1810"]) #woodChip { display: none; }
+body[data-era="1810"] #techChip, body[data-era="1810"] .only2014, body[data-era="1810"] .bopt[data-b="factory"] { display: none; }
+
+/* ---- settlement upgrade (region header + province panel) */
+button.upg { background: linear-gradient(#e7b84e, #c9932c); color: #1b1408; border: 1px solid #f6d27c; font-weight: 800; border-radius: 8px; padding: 6px 12px; cursor: pointer; display: inline-flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
+button.upg small { font-weight: 600; font-size: 11px; opacity: .8; }
+button.upg:hover:not(:disabled) { filter: brightness(1.08); }
+button.upg.poor { background: linear-gradient(#8d8576, #6f685b); border-color: #a59d8e; color: #f2ede2; }
+button.upg:disabled { background: #3f3a31; color: #cbbf9f; border-color: #5a5244; cursor: default; }
+#provPanel button.upg { width: 100%; margin: 8px 0 2px; align-items: center; }
+
+/* ---- woodcutting popup and the floating job label */
+#woodPop { position: absolute; z-index: 30; display: none; width: 220px; padding: 9px 10px 8px; border-radius: 10px; background: rgba(24, 20, 14, .92); border: 1px solid #6b5a3a; color: #f2ead8; box-shadow: 0 6px 18px rgba(0, 0, 0, .45); font-size: 13px; }
+#woodPop.show { display: block; }
+#woodPop .wp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+#woodPop .wp-head button { background: none; border: 0; color: #cbbf9f; cursor: pointer; font-size: 14px; }
+#woodPopBtn { width: 100%; padding: 7px; border-radius: 7px; border: 1px solid #a6d07a; background: linear-gradient(#6f9a3f, #4f7a2a); color: #fff; font-weight: 800; cursor: pointer; }
+#woodPopBtn b { color: #ffe9a8; }
+#woodPop small { display: block; margin-top: 6px; opacity: .7; font-size: 11px; line-height: 1.3; }
+.rl.chop { font-weight: 800; font-size: 13px; color: #fff6dc; background: rgba(40, 30, 18, .78); padding: 3px 9px; border-radius: 12px; border: 1px solid #8a6a3a; white-space: nowrap; }

@@ -136,6 +136,15 @@ Claude Code hafızası proje yoluna göre bir klasörde durur:
    - Takılma düzeltildi: hedef artık her zaman karada, ayrıca 3 saniye ilerlemeyen ordu engeli aşıyor.
    - Kayıtlar artık yoldaki askerleri de saklıyor; eski kayıtlarda kaybolan askerler yüklemede başkente geri ekleniyor.
 
+**30 Ekim akşam (yeni bilgisayar, GitHub üzerinden):**
+1. **Yerleşim sistemi:** şehir/kasaba inşası kalktı. Kendi her bölgen 3–5 minik evli **köy** ile başlar; bölge kartındaki (ve il panelindeki) **⬆️ Yükselt** düğmesiyle Köy → Kasaba → Şehir → Büyük şehir. Maliyet her adımda ×1,5 (2500💰 250🍞 60🪵 → 3750/375/90 → 5625/563/135). 3. seviye şehri büyütmez, yalnız nüfus sınırı ekler (+250 / +500 / +750). Başkentin eski bedava şehri yerine başlangıçta +500 nüfus sınırı. Eski kayıtlardaki şehir/kasaba binaları yüklemede bölgenin yerleşim seviyesine çevrilir. (`main.js` → `upgradeSettlement`, `SETTLE_*`; `sim/constants.js` → `UPGRADE_BASE`, `SETTLE_POP`)
+2. **Tarlalar:** kendi bölgelerinde hazır tarla yok; inşa ettiğin tarla ilk tarlalar gibi görünür (boyalı şerit + ekin sıraları + çit + saman yığını) ve önizlemenin yönünde (yola paralel) durur.
+3. **Yerleştirme:** önizleme **mavi** = uygun, **kırmızı** = olmaz; kırmızıyken tıklamak artık inşa etmez ve nedenini söyler (orman / tarla / başka yapı / zemin / kıyı / para / odun). Tüm taban alanı örnekleniyor (tarla 6×5 dikdörtgen, bina daire). Bölgede bina seçince inşa menüsü kapanır (B ile tekrar açılır).
+4. **Yapılar dünya haritasında görünmez** (yalnız bölge yakın çekiminde).
+5. **Odun (1810):** bölgende bir ormana tıkla → "🪓 Odun topla" → 2–4 oduncu (Blender: `worker_*` varyantları, balta + `chop` animasyonu) yürür, 5 sn keser, ağaçlar devrilir, kütükler kalır, ağaç başına 1 odun (bir koru en fazla 40 ağaç). Kesilen ağaçlar kayıtta (`S.cleared`) saklanır; orman her ziyarette aynı dağılır (ayrı rastgele dizi). Ormanın üstüne inşaat yapılamaz. 2014'te aynı işlem odun vermeden alanı açar.
+6. **Dönem kuralları:** 1810'da odun HUD'da; liman 40🪵, tersane 60🪵, balıkçı limanı 25🪵, yelkenli gemi 30🪵 ister. 1810'da teknoloji yok (HUD, ticaret, sanayi fabrikası gizli; saldırı bonusu yok); garaj → **Top Dökümhanesi**, tank → **top** (1000💰 + 10 nüfus + 20 demir + 5 kömür). 2014'te tank 10⚙️, savaş gemisi 25⚙️ teknoloji ister.
+7. Blender betiği (`blender/human.py`) artık açık Blender içinde de çalışıyor (fabrika ayarına dönmeden sahneyi boşaltır); MCP ile `-- <models klasörü> worker_1810 …` argümanlarıyla çalıştırıldı.
+
 ---
 
 ## 7. Test durumu (son çalıştırma)
@@ -161,6 +170,9 @@ Hepsi geçti (30 Ekim, son kod):
 - Dış kırsal kaba köşe renkleriyle boyanıyor; çok yakından bakınca iç bölgeden daha bulanık.
 - 1810'da eklenen bazı adlar ("Sahara tribes", "Borneo sultanates", "Native nations") genel; istersen tek tek tarihi adlarla değiştirilebilir (`scripts/fill-1815.mjs` içindeki `HIST` tablosu).
 - Ses yok.
+- Oduncular küçük görünüyor; balta savuruşu yakından iyi, uzaktan seçilmiyor. Kesilen alanın zemini hâlâ orman tabanı renginde olabilir.
+- Köy meydanı (taş döşeli daire) birkaç evlik köy için büyük kalıyor.
+- Bu bilgisayardaki test ortamında (yazılımsal GPU, Linux) bir kare çok yavaş; testler simülasyonu elle adımlayarak yapıldı.
 - Denge yeni ayarlandı; gerçek oyunda deneyip barış süresi, muhafız oranı ve ordu fiyatı için geri bildirim vermek iyi olur (`main.js` → `PEACE_MONTHS`, `THREAT_RAMP_MONTHS`, `militiaOf`; `sim/constants.js` → `M_*`, `ARMY_UNIT_COST`, `ARMY_UNIT_POP`).
 
 ---

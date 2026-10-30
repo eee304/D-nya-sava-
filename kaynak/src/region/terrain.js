@@ -88,7 +88,7 @@ export function buildTerrain(info, B, rng) {
 
   // ---- fields around the town
   const FIELDS = [];
-  const fieldCount = info.biome === 'polar' ? 0 : Math.round(((info.biome === 'desert' ? 3 : 7) + ((info.devLevel ?? 2) <= 1 ? 3 : 0)) * 1.8);
+  const fieldCount = info.biome === 'polar' || info.noFields ? 0 : Math.round(((info.biome === 'desert' ? 3 : 7) + ((info.devLevel ?? 2) <= 1 ? 3 : 0)) * 1.8);
   for (let i = 0; i < 900 && FIELDS.length < fieldCount; i++) {
     const a = rng() * Math.PI * 2, r = townR + 6 + rng() * 30, x = Math.cos(a) * r, z = Math.sin(a) * r;
     const w = 5 + rng() * 3, h = 4 + rng() * 3;
@@ -97,6 +97,7 @@ export function buildTerrain(info, B, rng) {
     if (FIELDS.some(f => Math.hypot(f[0] - x, f[1] - z) < 7.5)) continue;
     FIELDS.push([x, z, w, h, a + Math.PI / 2]);
   }
+  // the player's own provinces start without fields: every field there is one they built
   const inField = (x, z, m = 0) => FIELDS.some(([fx, fz, w, h, r]) => {
     const dx = x - fx, dz = z - fz, c = Math.cos(-r), s = Math.sin(-r), lx = dx * c - dz * s, lz = dx * s + dz * c;
     return Math.abs(lx) < w / 2 + m && Math.abs(lz) < h / 2 + m;

@@ -57,7 +57,7 @@ function scatter(scene, geo, mat, list, color, jitter = .18) {
 }
 
 // ground cover: grass, flowers, reeds, crops
-export function addGroundCover(scene, T, B, info, rng, free) {
+export function addGroundCover(scene, T, B, info, rng, free, out = null) {
   const dry = info.biome === 'desert', cold = info.biome === 'polar';
   const tufts = [], flowers = [], reeds = [], stones = [];
   const nGrass = Math.round((cold ? 500 : dry ? 1300 : 5000) * AREA);
@@ -77,15 +77,23 @@ export function addGroundCover(scene, T, B, info, rng, free) {
     reeds.push({ x, y: h - .05, z, r: rng() * 6, s: .7 + rng() * .6, color: dry ? '#a9a35a' : '#6f8a3a' });
   }
   const grassMat = windy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .95, side: THREE.DoubleSide }), .09);
-  scatter(scene, bladeTuft(7, .32, .035), grassMat, tufts, B.grass[0], .14);
-  scatter(scene, gradient(mergeGeometries([new THREE.CylinderGeometry(.006, .006, .26, 3).translate(0, .13, 0).toNonIndexed(), new THREE.IcosahedronGeometry(.045, 0).translate(0, .27, 0)])), windy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .8 }), .1), flowers, '#ffffff', .1);
+  const grassM = scatter(scene, bladeTuft(7, .32, .035), grassMat, tufts, B.grass[0], .14);
+  const flowerM = scatter(scene, gradient(mergeGeometries([new THREE.CylinderGeometry(.006, .006, .26, 3).translate(0, .13, 0).toNonIndexed(), new THREE.IcosahedronGeometry(.045, 0).translate(0, .27, 0)])), windy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .8 }), .1), flowers, '#ffffff', .1);
   scatter(scene, bladeTuft(9, .75, .025), windy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .9, side: THREE.DoubleSide }), .12), reeds, '#6f8a3a', .12);
-  scatter(scene, new THREE.DodecahedronGeometry(.13, 0), new THREE.MeshStandardMaterial({ roughness: .95, flatShading: true }), stones, B.rock[1], .12);
+  const stoneM = scatter(scene, new THREE.DodecahedronGeometry(.13, 0), new THREE.MeshStandardMaterial({ roughness: .95, flatShading: true }), stones, B.rock[1], .12);
 
-  // crops: rows of plants following each field's orientation; the local flavour decides what grows
-  // (tulip stripes in the Netherlands, vineyards around the Mediterranean, green rice in East Asia)
+  if (out) out.push({ m: grassM, list: tufts }, { m: flowerM, list: flowers }, { m: stoneM, list: stones });
+  addCrops(scene, T, info, rng, T.FIELDS, 0, out);
+  return tufts.length;
+}
+
+// crops: rows of plants following each field's orientation; the local flavour decides what grows
+// (tulip stripes in the Netherlands, vineyards around the Mediterranean, green rice in East Asia)
+// fields[i] is field number i0+i (the number picks wheat or cabbage, like the painted colour)
+export function addCrops(scene, T, info, rng, fields, i0 = 0, out = null) {
   const flora = info.flora || {}, crops = [], cabbages = [], tulips = [], vines = [];
-  T.FIELDS.forEach(([fx, fz, w, h, r], fi) => {
+  fields.forEach(([fx, fz, w, h, r], k) => {
+    const fi = i0 + k;
     const golden = fi % 2 === 0, c = Math.cos(r), s = Math.sin(r);
     const kind = flora.tulips ? 'tulip' : flora.vines && !golden ? 'vine' : golden ? 'wheat' : 'cabbage';
     const du = kind === 'vine' ? .3 : .32, dv = kind === 'tulip' ? .16 : kind === 'vine' ? .55 : golden ? .2 : .34;
@@ -100,18 +108,19 @@ export function addGroundCover(scene, T, B, info, rng, free) {
   });
   const head = gradient(new THREE.CylinderGeometry(.018, .01, .12, 4).translate(0, .45, 0), 1.05, 1.25); head.deleteAttribute('uv');
   const wheat = mergeGeometries([bladeTuft(5, .42, .02), head]);
-  scatter(scene, wheat, windy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .9, side: THREE.DoubleSide }), .1), crops, '#d8b44a', .1);
-  scatter(scene, gradient(new THREE.IcosahedronGeometry(.12, 1).scale(1, .7, 1).translate(0, .06, 0), .6, 1.15), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .8, flatShading: true }), cabbages, '#5f8f35', .1);
+  const ms = [];
+  ms.push(scatter(scene, wheat, windy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .9, side: THREE.DoubleSide }), .1), crops, '#d8b44a', .1));
+  ms.push(scatter(scene, gradient(new THREE.IcosahedronGeometry(.12, 1).scale(1, .7, 1).translate(0, .06, 0), .6, 1.15), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .8, flatShading: true }), cabbages, '#5f8f35', .1));
   // tulip: green stem and leaves, coloured cup
   const cup = new THREE.CylinderGeometry(.05, .03, .08, 6).translate(0, .27, 0).toNonIndexed(); cup.deleteAttribute('uv');
   const tc = new Float32Array(cup.attributes.position.count * 3).fill(1); cup.setAttribute('color', new THREE.BufferAttribute(tc, 3));
   const stem = bladeTuft(3, .24, .015), sc = stem.attributes.color; for (let i = 0; i < sc.count; i++) sc.setXYZ(i, sc.getX(i) * .35, sc.getY(i) * .6, sc.getZ(i) * .3);
-  scatter(scene, mergeGeometries([stem, cup]), windy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .7, side: THREE.DoubleSide }), .08), tulips, '#e8343a', .08);
+  ms.push(scatter(scene, mergeGeometries([stem, cup]), windy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .7, side: THREE.DoubleSide }), .08), tulips, '#e8343a', .08));
   // vine: a leafy hedge-row bush on a stake
   const stake = gradient(new THREE.CylinderGeometry(.015, .015, .5, 4).translate(.14, .25, 0), .5, .6), bush = gradient(new THREE.IcosahedronGeometry(.16, 1).scale(1.3, 1, .7).translate(0, .3, 0), .55, 1.15);
   stake.deleteAttribute('uv'); bush.deleteAttribute('uv');
-  scatter(scene, mergeGeometries([stake, bush]), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .85, flatShading: true }), vines, '#4a6a2a', .1);
-  return tufts.length;
+  ms.push(scatter(scene, mergeGeometries([stake, bush]), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .85, flatShading: true }), vines, '#4a6a2a', .1));
+  return ms.filter(Boolean);
 }
 
 // town life around the plaza and along the roads; occupied(x,z,r) / mark(x,z,r) keep things from overlapping
@@ -154,8 +163,8 @@ export function addTownProps(scene, T, info, rng, occupied, mark) {
     else { K.part(B, new THREE.SphereGeometry(.13, 8, 6).scale(1, 1.2, .9), '#c9b48a', 0, .14, 0); K.part(B, new THREE.SphereGeometry(.11, 8, 6).scale(1, 1.2, .9), '#bca67a', .18, .12, .05); }
     mark(x, z, .25);
   }
-  // street lamps along the roads in town
-  for (const road of T.ROADS) {
+  // street lamps along the roads in town (an 1810 village has none)
+  if (dev >= 1 || era === '2014') for (const road of T.ROADS) {
     const L = Math.min(polyLen(road), T.townR + 6);
     for (let s = 4; s < L; s += 3.2) for (const side of [-1, 1]) {
       if ((s / 3.2 + (side > 0 ? 0 : .5)) % 1 > .6) continue;
@@ -196,9 +205,15 @@ export function addTownProps(scene, T, info, rng, occupied, mark) {
     K.part(B, box(.3, .06, .3), '#9a958c', 0, .57, 0); K.part(B, box(.2, .2, .2), '#f2d48a', 0, .7, 0); K.part(B, new THREE.ConeGeometry(.26, .2, 4), '#8a857c', 0, .9, 0, Math.PI / 4);
     mark(x, z, .3);
   }
-  // split-rail fences around the fields
-  T.FIELDS.forEach(([fx, fz, w, h, r], i) => {
-    if (i % 2) return;
+  addFences(K, T, T.FIELDS, 0);
+  K.flush(scene);
+}
+
+// split-rail fences around every other field (fields[i] is field number i0+i)
+export function addFences(K, T, fields, i0 = 0) {
+  const M4 = (x, z, ry = 0) => K.M4(x, T.H(x, z), z, ry);
+  fields.forEach(([fx, fz, w, h, r], fk) => {
+    if ((i0 + fk) % 2) return;
     const c = Math.cos(r), s = Math.sin(r);
     const post = (u, v) => [fx + u * c - v * s, fz + u * s + v * c];
     const edges = [[[-w / 2, -h / 2], [w / 2, -h / 2]], [[w / 2, -h / 2], [w / 2, h / 2]], [[w / 2, h / 2], [-w / 2, h / 2]], [[-w / 2, h / 2], [-w / 2, -h / 2]]];
@@ -214,5 +229,4 @@ export function addTownProps(scene, T, info, rng, occupied, mark) {
       }
     }
   });
-  K.flush(scene);
 }
