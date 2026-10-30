@@ -284,7 +284,8 @@ def build(variant):
     elif worker:
         def chop(t):   # two-handed overhead stroke: slow wind-up (axe behind the head), fast strike low into the trunk, short recovery
             sm = lambda k: k * k * (3 - 2 * k)
-            A0_, A1_, W0, W1, S0, S1 = -.95, -2.85, -.55, 1.15, -.25, .12   # arm / wrist / spine at strike and at the top of the wind-up
+            # arm / wrist / spine at the strike and at the top of the wind-up; haft direction = arm + forearm + wrist (all about X)
+            A0_, A1_, W0, W1, S0, S1 = -1.15, -2.85, .15, -.45, -.25, .12
             if t < .5: e = sm(t / .5)
             elif t < .62: e = 1 - ((t - .5) / .12) ** 2
             else: e = 0
@@ -294,8 +295,9 @@ def build(variant):
             P('thigh_R').rotation_euler = (.24, 0, -.05); P('shin_R').rotation_euler = (.2, 0, 0); P('foot_R').rotation_euler = (-.12, 0, 0)
             P('hips').location = (0, -.012 - .018 * (1 - e), 0); P('spine').rotation_euler = (sp, -.1, 0); P('neck').rotation_euler = (-sp * .7, .08, 0)
             # both fists close on the haft in front of the chest: the arms swing in towards the middle
-            P('upper_R').rotation_euler = (a, 0, -.32); P('fore_R').rotation_euler = (-.3 - .25 * e, 0, 0); P('hand_R').rotation_euler = (w, 0, 0)
-            P('upper_L').rotation_euler = (a + .12, 0, .62); P('fore_L').rotation_euler = (-.55 - .2 * e, 0, 0)
+            # (Y swings a forward-pointing arm towards the middle, Z a raised one: blend them along the stroke)
+            P('upper_R').rotation_euler = (a, -.12 * (1 - e), .15 * e); P('fore_R').rotation_euler = (-.1 - .45 * e, 0, 0); P('hand_R').rotation_euler = (w, 0, 0)
+            P('upper_L').rotation_euler = (a + .1, .32 * (1 - e), -.36 * e); P('fore_L').rotation_euler = (-.35 - .3 * e, 0, 0)
         action('walk', 24, lambda t: walk(t, .4, .18)); action('idle', 48, idle); action('chop', 30, chop)
     else:
         action('walk', 24, (lambda t: walk(t, .36, .2)) if fw else walk); action('idle', 48, idle)
