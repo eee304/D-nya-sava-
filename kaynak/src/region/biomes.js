@@ -56,7 +56,12 @@ function africaBiome(lat, lon) {
 export function biomeFor(lat, iso, lon) {
   const a = Math.abs(lat);
   if (a >= 71 || iso === 'GL' || iso === 'AQ') return 'polar';
+  if (lon != null && lat > 34.4 && lat < 35.8 && lon > 32 && lon < 34.7) return 'temperate';   // Cyprus: green, not the Levant's steppe
   const af = lon != null && africaBiome(lat, lon); if (af) return af;
+  // the Arabian and Syrian deserts by geography, whoever rules them (1810 Ottoman lands carry Türkiye's code)
+  if (lon != null && lat >= 12 && lat <= 31 && lon >= 34.5 && lon <= 60) return 'desert';
+  if (lon != null && lat > 31 && lat <= 34 && lon >= 37.5 && lon <= 47.5) return 'desert';
+  if (lon != null && lat > 34 && lat <= 36.6 && lon >= 38.5 && lon <= 45) return 'steppe';
   if (DESERT.has(iso)) return 'desert';
   if (STEPPE.has(iso)) return 'steppe';
   if (TROPICAL.has(iso) || a <= 15) return 'tropical';

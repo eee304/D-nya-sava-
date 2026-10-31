@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-const LIST = ['house_eu', 'house_ottoman', 'house_eastasia', 'apt_4', 'apt_6', 'house_2014', 'car_2014', 'van_2014', 'wagon_1810', 'ship_1810', 'ship_2014', 'boat_fishing'];
+const LIST = ['house_vil', 'house_eu', 'house_ottoman', 'house_eastasia', 'apt_4', 'apt_6', 'house_2014', 'car_2014', 'van_2014', 'wagon_1810', 'ship_1810', 'ship_2014', 'boat_fishing'];
 export const PREFABS = {};
 export const RIGS = {};   // skinned + animated models kept whole: { scene, animations }
 const RIG_LIST = ['horse', 'soldier_1810', 'soldier_1810_isl', 'soldier_1810_ea', 'soldier_2014', 'civ_1810', 'civ_1810_f', 'civ_1810_isl', 'civ_1810_isl_f',

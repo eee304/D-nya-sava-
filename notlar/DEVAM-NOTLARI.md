@@ -153,6 +153,14 @@ Claude Code hafızası proje yoluna göre bir klasörde durur:
 5. **Madenler:** Maden Ocağı menüden kalktı, kaynak haritası maden göstermez. Kendi her bölgende 3–5 **cevherli kaya** (altın/gümüş/bakır/demir/elmas; bölgenin altındaki gerçek yatak ilk ikisini belirler). Kayaya tıkla → 1000💰 ile kaz → 3 Blender madenci (`miner_*`: kazma) 7 sn kazar, kaya parçalanır, bir madenin **8 dakikalık** geliri tek seferde gelir (demir: 80 demir). Kazılan kayalar kayıtta (`S.dug`). (`main.js` → `DIG_COST`, `DIG_SECS`, `DIG_MULT`)
 6. Blender bilgisayarda kapalıyken modeller bu ortamda `pip install bpy==5.2.3` (aynı sürüm) ile üretildi.
 
+**31 Ekim akşam:**
+1. **Gemiler:** iskele, liman ya da tersane kendiliğinden gemi çıkarmaz (oyuncunun bölgelerinde süs yelkenlisi de yok). Gemi yalnız **tersaneden** üretilir (liman şartı kalktı); dünya haritasında tersanenin yanındaki ilk boş suya, diğer gemilerden en az 4,2 birim uzağa iner; bölge görünümünde iskelenin önünde, birbirinden 9 birim aralıklı demirli görünür (`RegionView.addShip`).
+2. **Köy evi (kullanıcının modeli):** `blender/kaynak-modeller/village_house.obj` (© 2018 illuminachos, Downloads/31-village-house.zip) → `blender/village_house.py` dokudaki renge + yüksekliğe göre yüzleri saz/kiriş/sıva/taş/cam rollerine ayırıp `public/models/house_vil.glb` üretir. 1810 Avrupa ve İslam köylerinde evlerin ~%60'ı, kasaba/şehirlerde ~%12'si bu ev.
+3. **Şehir surları:** oyuncunun şehir (seviye 2+) bölgelerinde her dönemde ve kültürde taş sur.
+4. **Kıyı hatası:** 1810'da bazı ülke şekilleri ters sarılı olduğu için küresel "kara mı?" testi denizde de kara diyordu; hiçbir bölge kıyısını bulamıyordu. Ters şekiller test için düzeltildi (`rewindFeature`); kıyı en fazla yarım kare uzağa konuyor, deniz yakınlaşınca görünüyor. (Not: ordu ızgarası (`LAND_GRID`) 1810'da Karadeniz'i hâlâ kara sayıyor — ayrıca bakılmalı.)
+5. **Osmanlı (1810):** Akdeniz bölgesi üçe ayrıldı → Güney Anadolu (eski Akdeniz'in sırası, kayıtlar bozulmaz), Kıbrıs, Şam (`splitOttomanMed`). İklim: Arap yarımadası ve Suriye çölü coğrafyaya göre çöl/bozkır (Osmanlı'ya TR kodu verildiği için önce ılıman çıkıyordu), Kıbrıs ve Güney Anadolu yeşil.
+6. Referans (free3d "cartoon low poly landscape"): ormanlara devrik kütükler ve mantar kümeleri eklendi.
+
 ---
 
 ## 7. Test durumu (son çalıştırma)

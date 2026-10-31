@@ -112,7 +112,7 @@ export class RegionView {
     for (const b of info.buildings) if (b.type === 'field') T.FIELDS.push([b.x, b.z, 6, 5, -roadAngle(b.x, b.z)]);
 
     const K = new Kit(), patches = []; K.hi = true;
-    this.flags = []; this.blades = []; this.ships = []; this.basePos = null; this.forms = []; this.battle = null;
+    this.flags = []; this.blades = []; this.ships = []; this.docks = []; this.basePos = null; this.forms = []; this.battle = null;
     this.pumps = []; this.boats = []; this.chimneys = []; this.herds = [];
     const ownerTex = flagTexture(info.ownerColor, info.isPlayer);
 
@@ -163,7 +163,7 @@ export class RegionView {
     town(K, 0, 0, info.houses != null ? Math.min(T.townR, 4 + capCount * .55) : T.townR, capCount, info.houses != null && info.houses < 6 ? .78 : 1);
 
     // ---- walls (1810 only; huts get a palisade-free village)
-    if (era !== '2014' && culture !== 'african' && info.walls !== false) {
+    if (info.isPlayer ? info.walls : (era !== '2014' && culture !== 'african' && info.walls !== false)) {   // our cities always get stone walls
       const WR = T.townR + 4.5; this._wallR = WR;
       const stone = culture === 'islamic' ? '#bba886' : '#a39b8b', roof = culture === 'eastasia' ? '#2f3a44' : '#5b6470';
       const gates = T.ROADS.map(r => Math.atan2(r[1][1] - r[0][1], r[1][0] - r[0][0]));
@@ -233,8 +233,10 @@ export class RegionView {
     this.hearths = K.smoke.slice();   // house chimneys that smoke now and then
     this.life = new Life(scene, T, info, rng);   // traffic and townsfolk
 
-    // a sailing ship offshore when there is a coast
-    if (T.coast) {
+    // our own fleet: every ship we built that lies in these waters, moored apart from each other
+    for (const [sx, sz] of info.shipsAt || []) this.addShip(sx, sz);
+    // a sailing ship offshore when there is a coast (not in our provinces: there only the ships we build sail)
+    if (T.coast && !info.isPlayer) {
       const d = T.coast.d, s = makeShip(K, era); const p0 = [d[0] * (T.coast.D + 14), d[1] * (T.coast.D + 14)];
       if (T.H(...p0) < -.6 && Math.abs(p0[0]) < HALF - 5 && Math.abs(p0[1]) < HALF - 5) { s.position.set(p0[0], 0, p0[1]); scene.add(s); this.ships.push({ g: s, ph: rng() * 6, path: { c: p0, r: 5 } }); }
     }
@@ -760,13 +762,27 @@ export class RegionView {
       }
       this.placed.push(b.type); return true;
     }
-    if (b.type === 'shipyard' || this.ships.length < 3) {
-      const s = makeShip(K, this.info.era), sx = best.x + best.dir[0] * 7 + best.dir[1] * 2.6, sz = best.z + best.dir[1] * 7 - best.dir[0] * 2.6;
-      s.position.set(sx, 0, sz); s.rotation.y = Math.atan2(best.dir[0], best.dir[1]) - Math.PI / 2; this.scene.add(s);
-      this.ships.push({ g: s, ph: rng() * 6, path: null });
-    }
+    // (a pier or shipyard brings no ship by itself: ships are built at the shipyard)
+    this.docks = this.docks || []; this.docks.push({ x: best.x, z: best.z, dir: best.dir });
     this.placed.push(b.type);
     return true;
+  }
+
+  // a ship of ours at region point (x,z): in open water, at least 9 units from every other ship
+  addShip(x, z) {
+    if (!this.scene) return null;
+    const T = this.T, free = (px, pz) => T.H(px, pz) < -.7 && Math.abs(px) < HALF - 6 && Math.abs(pz) < HALF - 6 && this.ships.every(s => Math.hypot(s.g.position.x - px, s.g.position.z - pz) > 9)
+      && [0, 1.6, 3.2, 4.8].every(a => T.H(px + Math.cos(a) * 3, pz + Math.sin(a) * 3) < -.3);
+    let p = free(x, z) ? [x, z] : null;
+    // nearest dock first, then outward from the given spot
+    const d = (this.docks || []).slice().sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0];
+    const c = d ? [d.x + d.dir[0] * 9, d.z + d.dir[1] * 9] : [x, z];
+    for (let r = 0; !p && r < 60; r += 3) for (let k = 0; k < Math.max(1, Math.round(r * 1.2)); k++) { const a = k / Math.max(1, Math.round(r * 1.2)) * Math.PI * 2, px = c[0] + Math.cos(a) * r, pz = c[1] + Math.sin(a) * r; if (free(px, pz)) { p = [px, pz]; break; } }
+    if (!p) return null;
+    const K = new Kit(), s = makeShip(K, this.info.era, this.info.ownerColor); K.flush(this.scene);
+    s.position.set(p[0], 0, p[1]); s.rotation.y = d ? Math.atan2(d.dir[0], d.dir[1]) - Math.PI / 2 + (Math.random() - .5) * .5 : Math.random() * 6.3;
+    this.scene.add(s); this.ships.push({ g: s, ph: Math.random() * 6, path: null });
+    return p;
   }
 
   // roads keep going into the countryside instead of stopping at the edge of the square

@@ -156,6 +156,12 @@ export function house(K, x, y, z, rot, s, culture, era, rng, rural = false) {
     K.part(B, box(.36, .6, .05), '#2e2016', 0, .4, r * .98); K.part(B, box(.44, .06, .07), '#6b4a2e', 0, .72, r * .99);
     return r * 1.4 * s;
   }
+  // 1810 villages: many cottages are the timber-framed, thatched house from the user's model (blender/village_house.py)
+  if (K.hi && PREFABS.house_vil && era !== '2014' && (culture === 'european' || culture === 'islamic') && (rural ? v < .6 : v < .12)) {
+    const T2 = B.clone().multiply(new THREE.Matrix4().makeScale(.9, .9, .9));
+    K.prefab(T2, 'house_vil', { plaster: culture === 'islamic' ? pick(rng, ['#eadfca', '#e6d6b8', '#efe7d6']) : pick(rng, ['#eee6d4', '#f2ecdf', '#e8dcc4']), thatch: pick(rng, ['#c9a253', '#bf9a4e', '#d0ab5c', '#b8924a']) });
+    return 1.2 * s;
+  }
   if (K.hi && PREFABS.house_ottoman && culture === 'islamic' && v < .7) {   // Ottoman konak with its cumba
     K.prefab(B, 'house_ottoman', { plaster: wc, tile: rc }); return 1.3 * s;
   }

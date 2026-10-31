@@ -143,6 +143,31 @@ export function addVegetation(scene, T, B, rng, canPlace, blocked = null) {
     });
     for (const m of [crown, trunk]) if (m) { m.castShadow = true; m.receiveShadow = true; scene.add(m); meshes.push(m); }
   }
+  // forest floor (as in the low-poly landscape reference): fallen logs and little clusters of mushrooms beside the trees
+  {
+    const logs = [], shrooms = [];
+    for (let i = 0; i < trees.length; i++) {
+      const t = trees[i], r1 = rng(), a = rng() * 6.3, d = .9 + rng() * .8, x = t.x + Math.cos(a) * d, z = t.z + Math.sin(a) * d;
+      if (i % 23 === 0 && T.H(x, z) > .5 && canPlace(x, z, .6) && !(blocked && blocked(x, z))) logs.push([x, z, rng() * 6.3, .8 + r1 * .5]);
+      else if (i % 9 === 0 && T.H(x, z) > .5 && !(blocked && blocked(x, z))) for (let k = 0; k < 3 + (r1 * 3 | 0); k++) shrooms.push([x + (rng() - .5) * .5, z + (rng() - .5) * .5, .7 + rng() * .6, rng() < .7]);
+    }
+    const tint = (g, top, side) => { g = g.toNonIndexed(); const p = g.attributes.position, c = new Float32Array(p.count * 3), a = new THREE.Color(top), b = new THREE.Color(side); for (let k = 0; k < p.count; k++) { const q = Math.abs(p.getX(k)) > .5 ? a : b; c[k * 3] = q.r; c[k * 3 + 1] = q.g; c[k * 3 + 2] = q.b; } g.setAttribute('color', new THREE.BufferAttribute(c, 3)); return g; };
+    if (logs.length) {
+      const lg = tint(new THREE.CylinderGeometry(.13, .15, 1.1, 7, 1).rotateZ(Math.PI / 2).translate(0, .12, 0), '#c9a46e', '#5e4632');
+      const m = new THREE.InstancedMesh(lg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .95, flatShading: true }), logs.length);
+      logs.forEach(([x, z, r, s2], k) => { dmy.position.set(x, T.H(x, z) - .03, z); dmy.rotation.set(0, r, 0); dmy.scale.setScalar(s2); dmy.updateMatrix(); m.setMatrixAt(k, dmy.matrix); items.push({ x, z, i: k, meshes: [m] }); });
+      m.castShadow = true; m.receiveShadow = true; scene.add(m);
+    }
+    // two kinds (red fly agaric, brown cep): stem and cap coloured in the geometry, one instanced mesh each
+    for (const [red, capCol] of [[true, '#d23a2e'], [false, '#a8703a']]) {
+      const list = shrooms.filter(q => q[3] === red); if (!list.length) continue;
+      const stem = new THREE.CylinderGeometry(.022, .028, .09, 6).translate(0, .045, 0).toNonIndexed(), cap = new THREE.SphereGeometry(.06, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, .75, 1).translate(0, .085, 0).toNonIndexed();
+      for (const [g, h] of [[stem, '#f1ebdd'], [cap, capCol]]) { g.deleteAttribute('uv'); const c0 = new THREE.Color(h), c = new Float32Array(g.attributes.position.count * 3); for (let k = 0; k < c.length; k += 3) { c[k] = c0.r; c[k + 1] = c0.g; c[k + 2] = c0.b; } g.setAttribute('color', new THREE.BufferAttribute(c, 3)); }
+      const m = new THREE.InstancedMesh(mergeGeometries([stem, cap]), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .7 }), list.length);
+      list.forEach(([x, z, s2], k) => { dmy.position.set(x, T.H(x, z) - .01, z); dmy.rotation.set(0, k, 0); dmy.scale.setScalar(s2); dmy.updateMatrix(); m.setMatrixAt(k, dmy.matrix); items.push({ x, z, i: k, meshes: [m] }); });
+      m.receiveShadow = true; scene.add(m);
+    }
+  }
   // rocks on slopes / mountains, bushes on open ground
   const rocks = [], bushes = [];
   for (let i = 0; i < 9000 * AREA; i++) {

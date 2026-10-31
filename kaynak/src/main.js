@@ -953,11 +953,29 @@ function regionMesh(shapeList, color, idx, name, ringXZ, prov){
   if(prov){ m.userData.prov=prov; (meshesByProv[prov]||(meshesByProv[prov]=[])).push(m); }
 }
 
+// 1810 Ottoman 'Akdeniz' joined the south Anatolian coast, Cyprus and the Levant in one province:
+// Cyprus becomes its own, the coast north of the (later) Turkish–Syrian line becomes Güney Anadolu, the rest Şam
+const ANATOLIA_SOUTH=[[24,35.78],[35.75,35.78],[36.15,35.8],[36.38,36.2],[36.55,36.5],[36.68,36.83],[37,36.65],[38,36.85],[39,36.7],[40,36.95],[41,37.1],[42,37.3],[46,37.3],[46,44],[24,44],[24,35.78]];
+function splitOttomanMed(reg){
+  const i=reg.findIndex(r=>r.n==='Akdeniz'); if(i<0) return reg;
+  const r=reg[i], ctr=poly=>{ const q=poly[0]; let x=0,y=0; for(const p of q){ x+=p[0]; y+=p[1]; } return [x/q.length, y/q.length]; };
+  const isCyprus=poly=>{ const [x,y]=ctr(poly); return x>31.8 && x<34.8 && y>34.3 && y<35.9; };
+  const cyp=r.p.filter(isCyprus), rest=r.p.filter(p=>!isCyprus(p));
+  let north=[], south=[];
+  try{ north=polygonClipping.intersection(rest, [ANATOLIA_SOUTH]); south=polygonClipping.difference(rest, [ANATOLIA_SOUTH]); }catch(e){ return reg; }
+  // Güney Anadolu keeps Akdeniz's place in the list (province ids are saved in games), the new ones go to the end
+  const out=reg.slice();
+  out[i]={ n:'Güney Anadolu', p:north.length? north : rest };
+  if(cyp.length) out.push({ n:'Kıbrıs', p:cyp });
+  if(south.length && north.length) out.push({ n:'Şam', p:south });
+  return out;
+}
 // subdivide one country polygon into area-proportional clipped cells
 // every country is split into provinces; each province piece is its own mesh (userData.prov)
 function buildCountry(f, color, idx){
   const cname=f.properties && f.properties.name;
-  const reg=REGIONS[cname] || (cname==='Türkiye' && REGIONS.Turkey);
+  let reg=REGIONS[cname] || (cname==='Türkiye' && REGIONS.Turkey);
+  if(reg && cname==='Ottoman Empire' && S.currentEra==='1810') reg=splitOttomanMed(reg);
   const provs=(reg && reg.length>1 && provincesFromRegions(cname, reg.map(r=>({ label:r.n, polys:countryPolys({ geometry:{ type:'MultiPolygon', coordinates:r.p } }) })), capitalXZ(cname)))
     || splitCountry(cname, countryPolys(f), capitalXZ(cname));
   for(const p of provs){
@@ -1157,9 +1175,18 @@ let ALL_FEATURES = null;   // full feature list for the country picker
 // is (x,z) over land?
 // per-feature lon/lat bounding boxes, computed once, to prune geoContains calls
 let FEAT_BBOX=null;
+function rewindFeature(f){
+  const flip=poly=>poly.map(r=>r.slice().reverse()), g=f.geometry;
+  const coords = g.type==='Polygon' ? flip(g.coordinates) : g.coordinates.map(p=>{ const q=flip(p); return d3geo.geoArea({type:'Polygon', coordinates:p})>2*Math.PI ? q : p; });
+  return { ...f, geometry:{ type:g.type, coordinates:coords } };
+}
 function buildFeatBBox(){
   FEAT_BBOX=[];
-  for(const f of LANDFEATS){
+  for(const f0 of LANDFEATS){
+    // some historical shapes are wound the wrong way round: on the sphere such a ring encloses the whole rest of the
+    // world, and every sea point counted as land (no region ever found its coast). Test against a rewound copy.
+    let f=f0;
+    try{ if(d3geo.geoArea(f0)>2*Math.PI) f=rewindFeature(f0); }catch(e){}
     try{ const b=d3geo.geoBounds(f); // [[wLon,sLat],[eLon,nLat]]
       FEAT_BBOX.push({f, w:b[0][0], s:b[0][1], e:b[1][0], n:b[1][1]}); }
     catch(e){ FEAT_BBOX.push({f, w:-180,s:-90,e:180,n:90}); }
@@ -1195,10 +1222,10 @@ function buildLandGrid(){
   // matches the drawn meshes and is ~100x faster than a spherical point-in-polygon test per cell
   const SS=4, cv=document.createElement('canvas'); cv.width=LG_NX*SS; cv.height=LG_NZ*SS;
   const ctx=cv.getContext('2d',{willReadFrequently:true}); ctx.fillStyle='#fff';   // CPU canvas: fast readback
-  for(const f of LANDFEATS){ for(const poly of countryPolys(f)){ const ring=poly[0];
-    ctx.beginPath();
-    ring.forEach((p,i)=>{ const px=(p[0]-LG_X0)/LG_CELL*SS, pz=(-p[1]-LG_Z0)/LG_CELL*SS; if(i) ctx.lineTo(px,pz); else ctx.moveTo(px,pz); });
-    ctx.closePath(); ctx.fill(); } }
+  for(const f of LANDFEATS){ for(const poly of countryPolys(f)){
+    ctx.beginPath();   // outer ring and its holes (inland seas such as the Black Sea are holes in some 1815 shapes)
+    for(const ring of poly){ ring.forEach((p,i)=>{ const px=(p[0]-LG_X0)/LG_CELL*SS, pz=(-p[1]-LG_Z0)/LG_CELL*SS; if(i) ctx.lineTo(px,pz); else ctx.moveTo(px,pz); }); ctx.closePath(); }
+    ctx.fill('evenodd'); } }
   const a=ctx.getImageData(0,0,cv.width,cv.height).data;
   for(let iz=0; iz<LG_NZ; iz++) for(let ix=0; ix<LG_NX; ix++)
     LAND_GRID[iz*LG_NX+ix]= a[((iz*SS+SS/2)*cv.width + ix*SS+SS/2)*4+3]>127 ? 1 : 0;
@@ -1495,7 +1522,7 @@ function spawnBuilding(type, x, z, mineral, silent){
     g.traverse(o=>{ if(o.isMesh) o.userData.shipyard = true; });
     shipyards.push(g);
     undo=()=>{ S.portShipyardCount--; const i=shipyards.indexOf(g); if(i>=0)shipyards.splice(i,1); };
-    if(!silent) hintEl.textContent='Tersane kuruldu. Gemi üretmek için bir de liman gerekir; tersaneye tıkla.';
+    if(!silent) hintEl.textContent='Tersane kuruldu. Üstüne tıklayıp gemi üretebilirsin; gemiler tersanenin yanında suya iner.';
   }
   rec.undo=undo;
   g.userData.buildRec=rec;
@@ -1515,8 +1542,8 @@ function openShipMenu(yard){
 }
 document.getElementById('closeShip').onclick=()=>shipMenu.classList.remove('open');
 document.getElementById('buildShip').onclick=()=>{
-  if(ports.length===0){
-    hintEl.textContent='Gemi üretmek için önce bir LİMAN kurmalısın.';
+  if(shipyards.length===0){
+    hintEl.textContent='⚓ Gemi üretmek için önce bir TERSANE kurmalısın; gemiler tersaneden çıkar.';
     return;
   }
   const shipCost=Math.round(SHIP_COST*ideoMilitaryCostMult());
@@ -1534,27 +1561,22 @@ document.getElementById('buildShip').onclick=()=>{
   }
   S.money -= shipCost; updateMoney();
   const s=makeShip(S.currentEra);
-  // ship appears in the water next to a port (nearest port to the active shipyard)
-  let anchor = ports[ports.length-1];
+  // the ship is launched from the shipyard: the nearest open water beside it, clear of the ships already there
   const yard = activeShipyard || shipyards[shipyards.length-1];
-  if(yard && ports.length>1){
-    let best=Infinity;
-    for(const p of ports){ const d=(p.position.x-yard.position.x)**2+(p.position.z-yard.position.z)**2;
-      if(d<best){ best=d; anchor=p; } }
+  const bx=yard.position.x, bz=yard.position.z, clear=(x,z)=>ships.every(o=>Math.hypot(o.position.x-x, o.position.z-z)>4.2);
+  let px=null, pz=null;
+  for(let r=1.5; r<=40 && px===null; r+=1.2){
+    const n=Math.max(8, Math.round(r*4));
+    for(let a=0;a<n;a++){ const ang=a/n*Math.PI*2, tx=bx+Math.cos(ang)*r, tz=bz+Math.sin(ang)*r;
+      if(!isLandPt(tx,tz) && clear(tx,tz)){ px=tx; pz=tz; break; } }
   }
-  const bx = anchor ? anchor.position.x : 0;
-  const bz = anchor ? anchor.position.z : 0;
-  // nudge outward from the port to find open water
-  let px=bx, pz=bz;
-  for(let r=10;r<=90;r+=6){
-    for(let a=0;a<16;a++){ const ang=a/16*Math.PI*2;
-      const tx=bx+Math.cos(ang)*r, tz=bz+Math.sin(ang)*r;
-      if(!isLandPt(tx,tz)){ px=tx; pz=tz; r=999; break; } }
-  }
+  if(px===null){ px=bx; pz=bz; }
   s.position.set(px, SHIP_Y, pz);
   s.rotation.y=Math.random()*Math.PI*2;
   worldGroup.add(s); ships.push(s); S.shipCount++;
-  hintEl.textContent='Gemi üretildi (limanın yanında, bakım -'+M_SHIP/2+'/ay)! Toplam gemi: '+ships.length+'.';
+  // seen from inside the region too
+  if(view==='region' && regionView && regionView.info){ const c=regionView.info.center, k=regionView.info.k; regionView.addShip((px-c[0])*k, (pz-c[1])*k); }
+  hintEl.textContent='🚢 Gemi tersaneden suya indi (bakım -'+M_SHIP/2+'/ay)! Toplam gemi: '+ships.length+'.';
 };
 
 // ---- army recruitment ----
@@ -3174,7 +3196,7 @@ new MutationObserver(()=>toast(hintEl.textContent.trim())).observe(hintEl, { chi
 const needs=(list, msg)=>{ if(list.length) return true; hintEl.textContent=msg; return false; };
 document.getElementById('armyAct').onclick=()=>{ if(needs(bases,'⚠️ Ordu kurmak için önce bir Askeri Üs inşa et (İnşa → Askeri Üs).')) openArmyMenu(); };
 document.getElementById('tankAct').onclick=()=>{ if(needs(garages, S.currentEra==='1810'? '⚠️ Top dökmek için önce bir Top Dökümhanesi inşa et.' : '⚠️ Tank üretmek için önce bir Garaj inşa et.')) openTankMenu(); };
-document.getElementById('navyAct').onclick=()=>{ if(needs(shipyards,'⚠️ Gemi üretmek için kıyıya bir Tersane ve Liman inşa et.')) openShipMenu(shipyards[0]); };
+document.getElementById('navyAct').onclick=()=>{ if(needs(shipyards,'⚠️ Gemi üretmek için önce kıyıya bir Tersane inşa et.')) openShipMenu(shipyards[0]); };
 document.getElementById('tradeAct').onclick=()=>{
   const on=!tradePanel.classList.contains('show'); tradePanel.classList.toggle('show', on); document.getElementById('tradeAct').classList.toggle('on', on);
   if(on){ if(!tradeOffers.length) rollTradeOffers(); renderTrade(); }
@@ -3636,7 +3658,7 @@ function regionInfoFor(idOrName){
       for(let i=0;i<r.length;i+=st){ const [x,z]=r[i], dx=x-center[0], dz=z-center[1], d=Math.hypot(dx,dz)||1;
         const o=Math.max(.35, span*.01);
         if(!isLandPtExact(x+dx/d*o, z+dz/d*o)){ sx+=dx/d; sz+=dz/d; n++; dmin=Math.min(dmin, d); } } }
-    if(n>=2){ const l=Math.hypot(sx,sz)||1; coast={ dir:[sx/l, sz/l], dist:Math.min(dmin*k, REGION_HALF-16) }; } }
+    if(n>=2){ const l=Math.hypot(sx,sz)||1; coast={ dir:[sx/l, sz/l], dist:Math.min(dmin*k, REGION_HALF*.5) }; } }   // (a coastal province always shows its sea within sight)
   // nearest real mountain range; otherwise some provinces are simply hilly highlands
   let mountains=null, md=1e9;
   for(const m of MTN){ const q=sceneXZ(m[0], m[1]); if(!q) continue;
@@ -3660,6 +3682,7 @@ function regionInfoFor(idOrName){
     isPlayer, ownerColor, ownerName, ownerCulture: isPlayer ? cultureOfCountry(S.homeName) : null, buildings, devLevel:devLvl, devName: isPlayer ? SETTLE_NAMES[settle] : DEV_LEVELS[devLvl][1], profile:(profileOf(country)||{}).mult,
     landmark: isPlayer ? settle>=2 : (p.capital || devLvl>=3), walls: isPlayer ? settle>=2 : (p.capital || devLvl>=3),
     // ours: no ready-made fields (every field is one we built), 3–5 cottages that grow with each upgrade, felled woods stay felled
+    shipsAt: isPlayer ? ships.map(sh=>[(sh.position.x-center[0])*k, (sh.position.z-center[1])*k]).filter(([x,z])=>Math.abs(x)<REGION_HALF+40 && Math.abs(z)<REGION_HALF+40) : [],
     ores: isPlayer ? oreKindsFor(p) : [], dug: isPlayer ? (S.dug[p.id]||[]) : [],
     noFields: isPlayer, houses: isPlayer ? [3 + hashStr(p.id) % 3, 11, 22, 22][settle] : null, settle, cleared: isPlayer ? (S.cleared[p.id]||[]) : [],
     army: troops, vehicles: S.currentEra==='2014' ? Math.min(3, Math.ceil(S.tankCount/3)) : Math.min(3, Math.floor(troops/15000)) };
@@ -3676,7 +3699,7 @@ async function enterRegion(name){
   try{
     getRegionView();
     regionView.battleSource = regionBattleState;
-    const sig = name + '|' + info.era + '|' + info.ownerColor + '|' + info.settle + '|' + info.cleared.length + '|' + info.dug.length + '|' + info.buildings.map(b => b.type + b.x.toFixed(1)).join(',')
+    const sig = name + '|' + info.era + '|' + info.ownerColor + '|' + info.settle + '|' + info.cleared.length + '|' + info.dug.length + '|' + info.shipsAt.length + '|' + info.buildings.map(b => b.type + b.x.toFixed(1)).join(',')
       + '|' + Math.round(info.army/400) + '|' + (regionBattleState(name) ? 'battle' : '');
     if(sig !== regionSig || !regionView.scene){ regionView.build(info); regionSig = sig; }
     regionView.setLighting(currentSky());
@@ -4136,6 +4159,18 @@ if (new URLSearchParams(location.search).has('test')) {
     get post(){ return post; },
     stats(){ const r=renderer.info.render; let meshes=0, inst=0, lines=0; scene.traverse(o=>{ if(o.visible===false) return; if(o.isInstancedMesh) inst++; else if(o.isMesh) meshes++; else if(o.isLine||o.isLineSegments) lines++; }); return { calls:r.calls, tris:r.triangles, meshes, inst, lines, geos:renderer.info.memory.geometries, tex:renderer.info.memory.textures }; },
     sceneRoot(){ return scene; },
+    legalAt(type,x,z){ return regionLegal(type,x,z); },
+    planarCover(lon,lat){ const q=sceneXZ(lon,lat), out=[]; if(!q) return 'noq';
+      const inR=(r,x,y)=>{ let c=false; for(let i=0,j=r.length-1;i<r.length;j=i++){ const [xi,yi]=r[i],[xj,yj]=r[j]; if(((yi>y)!==(yj>y)) && x<(xj-xi)*(y-yi)/(yj-yi)+xi) c=!c; } return c; };
+      for(const f of LANDFEATS) for(const poly of countryPolys(f)) if(inR(poly[0], q[0], -q[1])) out.push(f.properties.name);
+      for(const p of PROVS) for(const r of p.ringsXZ) if(inR(r, q[0], q[1])) out.push('PROV '+p.id);
+      return out; },
+    look(lon,lat,d){ const q=sceneXZ(lon,lat); if(!q) return; target.set(q[0]*worldGroup.scale.x,0,q[1]*worldGroup.scale.z); dist=d; place(); },
+    landAt(lon,lat){ const q=sceneXZ(lon,lat); return q? { q, exact:isLandPtExact(q[0],q[1]), grid:isLandPt(q[0],q[1]), back:projection.invert([q[0]+W/2,q[1]+H/2]) } : null; },
+    provsOf(c){ return (PI.byCountry[c]||[]).map(p=>{ const i=regionInfoFor(p.id);
+      // robust check: does any border point have water within a short step in any direction?
+      let wet=0, tot=0; for(const r of p.ringsXZ) for(let j=0;j<r.length;j+=Math.max(1,Math.floor(r.length/200))){ tot++; const [x,z]=r[j]; if([0,1,2,3,4,5,6,7].some(a=>!isLandPtExact(x+Math.cos(a*.785)*.6, z+Math.sin(a*.785)*.6))) wet++; }
+      return { id:p.id, name:p.name, label:p.label, area:Math.round(p.area||0), coast:i.coast? Math.round(i.coast.dist) : null, wet, tot, lat:+i.lat.toFixed(1), lon:+i.lon.toFixed(1), k:+i.k.toFixed(2) }; }); },
     rollOffers(){ rollTradeOffers(); return tradeOffers.map(o=>({ ...o })); }, resMap(){ resBtn.click(); return !!(resourceOverlay && resourceOverlay.visible); },
     renderOnce(){ renderer.info.reset(); renderer.info.autoReset=false; },
     regionSky(s, n=0){ if(regionView && regionView.scene) regionView.setLighting({ s, n }); },
