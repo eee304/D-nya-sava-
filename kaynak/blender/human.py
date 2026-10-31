@@ -1,7 +1,7 @@
 # Rigged humans for Map Battle Royale: 1810 / 2014 soldiers and townsfolk.
 # One smooth metaball body, accessories skinned rigidly to bones, colours in a vertex-colour layer.
 # Marker colours are replaced in the game: magenta = team / shirt, cyan = trousers (townsfolk), yellow = skin (townsfolk).
-# Variants: <kind>_<era>[_<culture>][_f]  kind: soldier | civ | worker (a townsman with an axe and a chop clip)  culture: eu (default) | isl (Ottoman / Islamic world) | ea (East Asia) | af (Africa)
+# Variants: <kind>_<era>[_<culture>][_f]  kind: soldier | civ | worker (a townsman with an axe and a chop clip) | miner (same, with a pickaxe)  culture: eu (default) | isl (Ottoman / Islamic world) | ea (East Asia) | af (Africa)
 #   Blender -b --factory-startup -P blender/human.py -- public/models
 import bpy, math, sys, os
 from mathutils import Vector
@@ -29,7 +29,7 @@ def build(variant):
         if bpy.context.object and bpy.context.object.mode != 'OBJECT': bpy.ops.object.mode_set(mode='OBJECT')
         for coll in (bpy.data.objects, bpy.data.meshes, bpy.data.armatures, bpy.data.actions, bpy.data.materials, bpy.data.metaballs, bpy.data.cameras, bpy.data.lights):
             for d in list(coll): coll.remove(d)
-    bits = variant.split('_'); era = bits[1]; soldier = bits[0] == 'soldier'; worker = bits[0] == 'worker'
+    bits = variant.split('_'); era = bits[1]; soldier = bits[0] == 'soldier'; worker = bits[0] in ('worker', 'miner'); miner = bits[0] == 'miner'
     fem = bits[-1] == 'f'; cul = bits[2] if len(bits) > 2 and bits[2] != 'f' else 'eu'
     # ---- body (character faces -Y, right side is -X, height 1.0)
     mb = bpy.data.metaballs.new('mb'); mb.resolution = .022; mb.render_resolution = .022
@@ -197,9 +197,14 @@ def build(variant):
         hx, hy = -A2 - .004, -.018
         cyl(.0085, .36, (hx, hy, .3), '#8a6a44', 'hand_R', v=8)                       # ash haft, from the fist down
         cyl(.011, .02, (hx, hy, .125), '#6b5236', 'hand_R', v=8)                      # swelled knob at the end
-        box((.022, .075, .04), (hx, hy - .028, .135), '#7c8288', 'hand_R')            # iron head, blade forward
-        box((.024, .012, .052), (hx, hy - .068, .135), '#c9ced3', 'hand_R')           # bright cutting edge
+        if miner:   # pick: a slightly curved iron bar across the haft end, both points tapered
+            box((.022, .2, .026), (hx, hy, .14), '#6f747a', 'hand_R')
+            for sy in (-1, 1): box((.016, .05, .016), (hx, hy + sy * .118, .128), '#a9aeb4', 'hand_R', rot=(sy * -.35, 0, 0))
+        else:
+            box((.022, .075, .04), (hx, hy - .028, .135), '#7c8288', 'hand_R')            # iron head, blade forward
+            box((.024, .012, .052), (hx, hy - .068, .135), '#c9ced3', 'hand_R')           # bright cutting edge
         box((.06, .014, .05), (0, .09, .52), '#5a4330', 'hips')                        # leather pouch at the back
+        if miner and era == '2014': sph(.106, (0, 0, .925), '#f2c230', 'head', (1, 1.05, .72)); cyl(.12, .01, (0, -.01, .905), '#f2c230', 'head', v=16)   # hard hat
     # ---- armature
     bpy.ops.object.armature_add(location=(0, 0, 0)); arm = bpy.context.active_object; arm.name = variant + '_rig'
     bpy.ops.object.mode_set(mode='EDIT'); eb = arm.data.edit_bones; eb.remove(eb[0])
@@ -310,7 +315,8 @@ def build(variant):
 ONLY = sys.argv[sys.argv.index('--') + 2:] if len(sys.argv) > sys.argv.index('--') + 2 else None
 VARIANTS = ['soldier_1810', 'soldier_1810_isl', 'soldier_1810_ea', 'soldier_2014', 'civ_1810', 'civ_1810_f', 'civ_1810_isl', 'civ_1810_isl_f',
             'civ_1810_ea', 'civ_1810_ea_f', 'civ_1810_af', 'civ_1810_af_f', 'civ_2014', 'civ_2014_f',
-            'worker_1810', 'worker_1810_isl', 'worker_1810_ea', 'worker_1810_af', 'worker_2014']
+            'worker_1810', 'worker_1810_isl', 'worker_1810_ea', 'worker_1810_af', 'worker_2014',
+            'miner_1810', 'miner_1810_isl', 'miner_1810_ea', 'miner_1810_af', 'miner_2014']
 for v in VARIANTS:
     if not ONLY or v in ONLY: build(v)
 
