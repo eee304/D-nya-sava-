@@ -50,3 +50,18 @@ export function resourceAt(lon,lat){
   }
   return best;
 }
+
+// ---- oil fields (2014): [lon, lat, radius in degrees]; shown in black on the resource map, oil wells only stand on them
+export const OIL_FIELDS = [
+  [49, 26, 5], [45, 31, 3.5], [48, 29.3, 1.6], [50.5, 31, 3], [54, 24, 2.2], [51.2, 25.2, 1.2], [56, 21, 2.2],   // Gulf: Saudi, Iraq, Kuwait, Iran, UAE, Qatar, Oman
+  [72, 61, 6], [55, 67, 3], [53, 46, 3], [49.8, 40.4, 1.6], [58, 39, 2],                                        // West Siberia, Komi, Kazakhstan, Baku, Turkmenistan
+  [-100, 31, 4], [-103, 48, 2.5], [-150, 70, 3], [-113, 56, 4], [-93, 19, 2.5], [-91, 27, 2],                   // Texas, Bakken, Alaska, Alberta, Mexico, Gulf of Mexico
+  [-66, 9, 3], [-73, 6, 1.6], [-77, -1, 1.6], [-41, -23, 2.2],                                                   // Venezuela, Colombia, Ecuador, Brazil offshore
+  [6, 5, 2.5], [19, 29, 4], [6, 30, 4], [13, -8, 2], [10, -1, 1.5], [30, 10, 2], [30, 28, 1.8],                // Nigeria, Libya, Algeria, Angola, Gabon, Sudan, Egypt
+  [2, 58, 3], [5, 62, 2],                                                                                        // North Sea
+  [101, 1, 2.5], [125, 46, 2.5], [84, 42, 3], [114, 5, 1.6],                                                     // Sumatra, Daqing, Xinjiang, Brunei
+];
+export function oilAt(lon, lat){
+  for (const [a, b, r] of OIL_FIELDS) if (Math.hypot(lon - a, lat - b) <= r) return true;
+  return false;
+}

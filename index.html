@@ -6,8 +6,8 @@
 <title>Map Battle Royale</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;800&display=swap">
-  <script type="module" crossorigin src="./assets/index-uD7sYIDa.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-DVGcrztb.css">
+  <script type="module" crossorigin src="./assets/index-CiQj4nrf.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DMx-gaN3.css">
 </head>
 <body>
   <div id="wrap">
@@ -17,13 +17,13 @@
       <div id="selinfo"></div>
       <div id="money">
         <div class="r"><i>Para</i><b id="moneyVal">0</b><em id="rateVal">+0/sn</em></div>
+        <div class="r" id="woodChip"><i>🪵 Odun</i><b id="woodVal">0</b></div>
         <div class="r"><i>Nüfus</i><b id="popVal">0</b></div>
         <div class="r"><i>Ordu</i><b id="armyVal">0</b></div>
         <div class="r"><i>Ekmek</i><b id="breadVal">0</b></div>
-        <div class="r" id="woodChip"><i>Odun</i><b id="woodVal">0</b></div>
         <div class="r"><i>Demir</i><b id="ironVal">0</b></div>
         <div class="r"><i>Gıda</i><b id="foodVal">0</b><em id="foodState"></em></div>
-        <div class="r"><i id="oilLbl">Petrol</i><b id="oilVal">0</b></div>
+        <div class="r" id="oilChip"><i id="oilLbl">Petrol</i><b id="oilVal">0</b></div>
         <div class="r" id="techChip"><i id="techLbl">Teknoloji</i><b id="techVal">0</b><em id="techBonus"></em></div>
         <div class="r" id="angerChip"><i>Halk öfkesi</i><b id="angerVal">%0</b></div>
       </div>
@@ -58,7 +58,7 @@
       <div id="trOffers"></div>
     </div>
     <div id="garrisonLabels"></div>
-    <div id="woodPop"><div class="wp-head"><b id="woodPopTitle"></b><button id="woodPopClose" type="button" title="Kapat">✕</button></div><button id="woodPopBtn" type="button"></button><small>Köylüler 5 saniye çalışır; ağaçlar devrilir, yerine inşaat yapılabilir.</small></div>
+    <div id="woodPop"><div class="wp-head"><b id="woodPopTitle"></b><button id="woodPopClose" type="button" title="Kapat">✕</button></div><button id="woodPopBtn" type="button"></button><small id="woodPopNote">Köylüler 5 saniye çalışır; ağaçlar devrilir, yerine inşaat yapılabilir.</small></div>
     <div id="warAlerts"></div>
     <div id="actionbar">
       <button id="buildBtn" class="act " type="button" title="İnşa"><svg viewBox="0 0 24 24"><path d="M4 20h16M6 20V11l6-5 6 5v9M10 20v-5h4v5"/></svg><span>İnşa</span><kbd>B</kbd></button>
@@ -113,11 +113,8 @@
       </div>
     </div>
     <div id="resLegend">
-      <div><span class="rc" style="background:#7fe3ff"></span>Elmas (1500)</div>
-      <div><span class="rc" style="background:#ffd35a"></span>Altın (1000)</div>
-      <div><span class="rc" style="background:#d8dde6"></span>Gümüş (400)</div>
-      <div><span class="rc" style="background:#d98a4b"></span>Bakır (300)</div>
-      <div><span class="rc" style="background:#9aa3ad"></span>Demir (+10/dk)</div>
+      <div><span class="rc" style="background:#0b0b0d;border:1px solid #555"></span>Petrol yatağı — petrol kuyusu yalnız buraya kurulur</div>
+      <div style="opacity:.8;font-size:11px">⛏️ Madenler: bölgene in, cevherli kayalara tıkla</div>
     </div>
     <div id="menuBg"><canvas id="menuGlobe"></canvas></div>
     <div id="mainmenu">
@@ -248,7 +245,6 @@
     </div>
     <div id="buildpanel">
       <button class="bopt" data-b="base">🪖 Askeri Üs (5000)<span class="binfo">Ordu kur · Gider: -8/gün</span></button>
-      <button class="bopt" data-b="mine">⛏️ Maden Ocağı (1000)<span class="binfo">Madeni çıkarır · Gider yok</span></button>
       <button class="bopt" data-b="bank">🏦 Banka (3000)<span class="binfo">Para limiti +7000 · Gider yok</span></button>
       <button class="bopt" data-b="garage">🏭 Garaj (1000)<span class="binfo">Tank üretir · Üstüne tıkla</span></button>
       <button class="bopt" data-b="port">⚓ Liman (5000)<span class="binfo">Gelir yok · Gider: -33/gün</span></button>
@@ -258,7 +254,7 @@
       <button class="bopt" data-b="choco">🍫 Çikolata Fb. (8000)<span class="binfo">Gider yok</span></button>
       <button class="bopt" data-b="fishery">🐟 Balıkçı Limanı (2000)<span class="binfo">Kıyıya · balık üretir</span></button>
       <button class="bopt" data-b="ranch">🐄 Hayvancılık (1500)<span class="binfo">Et ve süt üretir</span></button>
-      <button class="bopt" data-b="oilwell">🛢️ Petrol Kuyusu (4000)<span class="binfo">Yalnız petrolü olan ülkelerde</span></button>
+      <button class="bopt" data-b="oilwell">🛢️ Petrol Kuyusu (4000)<span class="binfo">Yalnız petrol yataklarına (Kaynaklar: siyah)</span></button>
       <button class="bopt" data-b="factory">⚙️ Sanayi Fabrikası (6000)<span class="binfo">Demir → teknoloji</span></button>
       <button class="bopt" data-b="none">✋ Kapat</button>
     </div>

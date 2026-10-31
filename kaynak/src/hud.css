@@ -384,7 +384,7 @@ body.in-region #cancelOpBtn, body.cinematic #cancelOpBtn { display: none !import
 
 /* ---- era differences: 1810 has wood and cannons, 2014 technology, tanks and factories */
 body:not([data-era="1810"]) #woodChip { display: none; }
-body[data-era="1810"] #techChip, body[data-era="1810"] .only2014, body[data-era="1810"] .bopt[data-b="factory"] { display: none; }
+body[data-era="1810"] #techChip, body[data-era="1810"] #oilChip, body[data-era="1810"] .bopt[data-b="oilwell"], body[data-era="1810"] .only2014, body[data-era="1810"] .bopt[data-b="factory"] { display: none; }
 
 /* ---- settlement upgrade (region header + province panel) */
 button.upg { background: linear-gradient(#e7b84e, #c9932c); color: #1b1408; border: 1px solid #f6d27c; font-weight: 800; border-radius: 8px; padding: 6px 12px; cursor: pointer; display: inline-flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
@@ -403,3 +403,6 @@ button.upg:disabled { background: #3f3a31; color: #cbbf9f; border-color: #5a5244
 #woodPopBtn b { color: #ffe9a8; }
 #woodPop small { display: block; margin-top: 6px; opacity: .7; font-size: 11px; line-height: 1.3; }
 .rl.chop { font-weight: 800; font-size: 13px; color: #fff6dc; background: rgba(40, 30, 18, .78); padding: 3px 9px; border-radius: 12px; border: 1px solid #8a6a3a; white-space: nowrap; }
+
+#woodChip b { color: #e8b878; }
+#taxInput.pending { outline: 2px solid #e8b84e; background: #3a2f18; }

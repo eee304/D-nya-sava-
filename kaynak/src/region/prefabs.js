@@ -8,7 +8,8 @@ export const PREFABS = {};
 export const RIGS = {};   // skinned + animated models kept whole: { scene, animations }
 const RIG_LIST = ['horse', 'soldier_1810', 'soldier_1810_isl', 'soldier_1810_ea', 'soldier_2014', 'civ_1810', 'civ_1810_f', 'civ_1810_isl', 'civ_1810_isl_f',
   'civ_1810_ea', 'civ_1810_ea_f', 'civ_1810_af', 'civ_1810_af_f', 'civ_2014', 'civ_2014_f',
-  'worker_1810', 'worker_1810_isl', 'worker_1810_ea', 'worker_1810_af', 'worker_2014'];   // woodcutters (axe + chop clip)
+  'worker_1810', 'worker_1810_isl', 'worker_1810_ea', 'worker_1810_af', 'worker_2014',   // woodcutters (axe + chop clip)
+  'miner_1810', 'miner_1810_isl', 'miner_1810_ea', 'miner_1810_af', 'miner_2014'];        // miners (pickaxe, same clip)
 
 export function loadPrefabs() {
   const loader = new GLTFLoader();

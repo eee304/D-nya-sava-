@@ -127,3 +127,23 @@ export function landMaterial(map, detail) {
   m.customProgramCacheKey = () => 'mbr-land';
   return m;
 }
+
+// the same land look for ALL provinces in one mesh: each vertex carries its province's fill (tint) and hover glow (emis),
+// so the whole world map is one draw call instead of thousands
+export function landMaterialMerged(map, detail) {
+  const m = new THREE.MeshStandardMaterial({ map, vertexColors: true, roughness: .92, metalness: .02 });
+  m.onBeforeCompile = sh => {
+    sh.uniforms.detailMap = { value: detail };
+    sh.vertexShader = 'attribute vec3 tint;\nattribute vec3 emis;\nvarying vec3 vTint;\nvarying vec3 vEmis;\n' +
+      sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTint = tint; vEmis = emis;');
+    sh.fragmentShader = 'uniform sampler2D detailMap;\nvarying vec3 vTint;\nvarying vec3 vEmis;\n' + sh.fragmentShader.replace('#include <map_fragment>',
+      'vec4 tx = texture2D(map, vMapUv);\n' +
+      '  float lum = dot(tx.rgb, vec3(.3, .59, .11));\n' +
+      '  diffuseColor.rgb = mix(tx.rgb, vTint * (.55 + .85 * lum), .58);\n' +
+      '  if (vColor.r < .99) diffuseColor.rgb = vTint * .55;\n' +
+      '  diffuseColor.rgb *= mix(.9, 1.08, texture2D(detailMap, vMapUv * vec2(420.0, 220.0)).r);')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += vEmis;');
+  };
+  m.customProgramCacheKey = () => 'mbr-land-merged';
+  return m;
+}

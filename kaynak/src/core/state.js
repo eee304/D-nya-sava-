@@ -46,7 +46,8 @@ export const S = {
   fed: false,              // was the population fed with fish/meat last month?
   spec: {},                // provinceId -> specialisation ('tarim' | 'sanayi' | 'askeri' | 'ticaret')
   settle: {},              // provinceId -> settlement level 0 village, 1 town, 2 city, 3 big city
-  cleared: {},             // provinceId -> felled tree positions (region coords, 'x,z' keys)
+  cleared: {},
+  dug: {},                 // provinceId -> indices of ore rocks already dug             // provinceId -> felled tree positions (region coords, 'x,z' keys)
   troops: {},              // provinceId -> our soldiers stationed there (S.army = total incl. troops on the move)
   currentEra: '2014',
 };

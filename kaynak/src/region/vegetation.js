@@ -6,9 +6,11 @@ import { LEAF } from './flora.js';
 import { windy } from './details.js';
 
 // lumpy leaf clump: subdivided icosahedron with its vertices pushed in and out a little
+// detail 1: 80 faces per lump instead of 320 — a province holds ~8 000 trees, at detail 2 they were 7 M triangles per pass
+let LUMP_DETAIL = 1, CONE_SEG = 9;   // lowered while building the far countryside's trees
 function clump(r, x, y, z, sx = 1, sy = 1, sz = 1, seed = 1) {
   // shared vertices so the crown shades smoothly (soft painted foliage instead of hard facets)
-  const ico = new THREE.IcosahedronGeometry(r, 2); ico.deleteAttribute('uv'); ico.deleteAttribute('normal');
+  const ico = new THREE.IcosahedronGeometry(r, LUMP_DETAIL); ico.deleteAttribute('uv'); ico.deleteAttribute('normal');
   const g = mergeVertices(ico), p = g.attributes.position;
   for (let i = 0; i < p.count; i++) {
     const vx = p.getX(i), vy = p.getY(i), vz = p.getZ(i), k = 1 + Math.sin(vx * 9.1 + seed) * Math.cos(vz * 7.3 + seed * 2) * .13 + Math.sin(vy * 11 + seed) * .06;
@@ -26,7 +28,7 @@ function shade(g, lo = .5, hi = 1.18) {
   g.setAttribute('color', new THREE.BufferAttribute(c, 3));
   return g;
 }
-const coneG = (r, h, x, y, z, seg = 9) => {   // drooping pine tier
+const coneG = (r, h, x, y, z, seg = CONE_SEG) => {   // drooping pine tier
   const pts = [new THREE.Vector2(0, h), new THREE.Vector2(r * .25, h * .78), new THREE.Vector2(r * .7, h * .3), new THREE.Vector2(r, 0), new THREE.Vector2(r * .82, -h * .08), new THREE.Vector2(0, 0)];
   const g = new THREE.LatheGeometry(pts, seg); g.deleteAttribute('uv');
   const p = g.attributes.position; for (let i = 0; i < p.count; i++) { const a = Math.atan2(p.getZ(i), p.getX(i)), k = 1 + Math.sin(a * 5 + h * 9) * .07; p.setX(i, p.getX(i) * k); p.setZ(i, p.getZ(i) * k); }
@@ -35,8 +37,10 @@ const coneG = (r, h, x, y, z, seg = 9) => {   // drooping pine tier
 
 const SWAY = .022;   // tree tops lean a few centimetres in the wind; trunk and crown share it so they stay joined
 const variants = new Map();   // two shapes per kind so neighbouring trees differ
-function crownGeo(kind, v = 0) {
-  const key = kind + v; if (variants.has(key)) return variants.get(key);
+function crownGeo(kind, v = 0, far = false) {
+  const key = kind + v + (far ? 'far' : '');
+  if (far) { LUMP_DETAIL = 0; CONE_SEG = 6; }
+  try { if (variants.has(key)) return variants.get(key);
   let g;
   if (kind === 'pine') g = shade(mergeGeometries([coneG(.68, .9, 0, .55, 0), coneG(.56, .8, 0, 1.05, 0), coneG(.42, .72, 0, 1.5, 0), coneG(.26, .6, 0, 1.9, 0)].map(q => q.toNonIndexed())), .42, 1.15);
   else if (kind === 'jungle') g = shade(mergeGeometries([clump(.85, 0, 2.1, 0, 1.1, .55, 1.1, v), clump(.6, .55, 1.85, .25, 1, .6, 1, v + 1), clump(.6, -.5, 1.9, -.3, 1, .6, 1, v + 2), clump(.5, .1, 2.35, -.4, 1, .55, 1, v + 3)].map(q => q.toNonIndexed())), .45, 1.12);
@@ -78,6 +82,7 @@ function crownGeo(kind, v = 0) {
   }
   variants.set(key, g);
   return g;
+  } finally { LUMP_DETAIL = 1; CONE_SEG = 9; }
 }
 function trunkGeo(kind) {
   if (kind === 'palm') {   // gently leaning trunk
@@ -148,7 +153,7 @@ export function addVegetation(scene, T, B, rng, canPlace, blocked = null) {
   const rockM = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ roughness: .95, flatShading: true }), Math.max(1, rocks.length));
   rockM.count = rocks.length;
   rocks.forEach(([x, y, z, s], i) => { dmy.position.set(x, y, z); dmy.rotation.set(rng() * 3, rng() * 3, rng() * 3); dmy.scale.set(s, s * .7, s); dmy.updateMatrix(); rockM.setMatrixAt(i, dmy.matrix); rockM.setColorAt(i, col.set(B.rock[0]).multiplyScalar(.8 + rng() * .35)); });
-  const bushGeo = new THREE.IcosahedronGeometry(1, 2); bushGeo.deleteAttribute('uv'); bushGeo.deleteAttribute('normal');
+  const bushGeo = new THREE.IcosahedronGeometry(1, 1); bushGeo.deleteAttribute('uv'); bushGeo.deleteAttribute('normal');
   const bushSmooth = mergeVertices(bushGeo); bushSmooth.computeVertexNormals();
   const bushM = new THREE.InstancedMesh(bushSmooth, vegMat.clone(), Math.max(1, bushes.length));
   bushM.count = bushes.length;
@@ -174,7 +179,7 @@ export function addOuterTrees(scene, T, B, rng, R = SIZE / 2 + 130) {
   const dmy = new THREE.Object3D(), col = new THREE.Color();
   for (const [kind] of kinds) {
     const list = trees.filter(t => t.kind === kind); if (!list.length) continue;
-    const crown = new THREE.InstancedMesh(crownGeo(kind, 0), windy(new THREE.MeshStandardMaterial({ roughness: .9, vertexColors: true, side: kind === 'palm' ? THREE.DoubleSide : THREE.FrontSide }), SWAY), list.length);
+    const crown = new THREE.InstancedMesh(crownGeo(kind, 0, true), windy(new THREE.MeshStandardMaterial({ roughness: .9, vertexColors: true, side: kind === 'palm' ? THREE.DoubleSide : THREE.FrontSide }), SWAY), list.length);
     const tg = trunkGeo(kind), trunk = tg ? new THREE.InstancedMesh(tg, windy(new THREE.MeshStandardMaterial({ color: '#5a4330', roughness: 1 }), SWAY), list.length) : null;
     const pal = LEAF[kind] || (kind === 'pine' ? ['#2f5530', '#2a4a2b', '#355f35', '#24442a'] : B.leaf);
     list.forEach((t, i) => {

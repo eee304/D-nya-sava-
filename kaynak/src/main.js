@@ -11,18 +11,19 @@ import { HALF as REGION_HALF } from './region/terrain.js';
 import { loadPrefabs, PREFABS } from './region/prefabs.js';
 import { prefabGroup } from './region/life.js';
 loadPrefabs();
-import { paintWorldTexture, detailTexture, landMaterial } from './world/mapTexture.js';
+import { paintWorldTexture, detailTexture, landMaterial, landMaterialMerged } from './world/mapTexture.js';
 import { splitCountry, provincesFromRegions, makeProvinceIndex } from './world/provinces.js';
 import { makeRng, hashStr } from './region/noise.js';
 import { startMenuGlobe } from './menu/globe.js';
 import { GOODS, GOOD_KEYS, goodLabel, profileFor } from './data/countryProfiles.js';
 import { biomeFor } from './region/biomes.js';
 import { Line2 } from 'three/addons/lines/Line2.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { histFlagURL, HIST_FLAG_FILE, ISO2, flagFor } from './data/flags.js';
 import { MIL_K, USA_K, MIL_1810, MIL_1810_MAX } from './data/military.js';
-import { MINERALS, DEPOSITS, resourceAt } from './data/resources.js';
+import { MINERALS, DEPOSITS, resourceAt, OIL_FIELDS, oilAt } from './data/resources.js';
 import { MTN, FOR, MTN_FOOTPRINT, TREE_FOOTPRINT } from './data/terrain.js';
 import { EMPIRES, BOT_COLORS, BOT_NAMES, PLAYER_COLORS } from './data/empires.js';
 import { MONTHS_TR, CITY_BREAD_COST, TOWN_BREAD_COST, BANK_CAP, M_SHIP, CITY_POP, TOWN_POP, ARMY_UNIT, ARMY_UNIT_COST, ARMY_UNIT_POP, COSTS, TANK_COST_MONEY, SHIP_COST, BATTLE_TIME, EARTH_KM2_PER_STER, BUILD_R, b_label, M_FARM, M_FIELD, M_PORTYARD, M_CITY, M_TOWN, M_BASE, M_OTHER, TANK_COST_POP, TANK_COST_IRON, TANK_ARMY,
@@ -444,14 +445,15 @@ const ironVal = document.getElementById('ironVal');
 const breadVal = document.getElementById('breadVal');
 const calDate = document.getElementById('calDate');
 const taxInput = document.getElementById('taxInput');
+// HUD text is written only when it changes (writing it every frame forced a style recalculation each frame)
+const setText=(el, v)=>{ if(el && el._v!==v){ el._v=v; el.textContent=v; } };
 function updateMoney(){ if(S.money>S.moneyCap) S.money=S.moneyCap; if(S.money<0) S.money=0;
-  moneyVal.textContent = Math.floor(S.money)+' / '+S.moneyCap;
-  moneyVal.style.color = '#ffd35a'; }
-function updatePop(){ if(popVal) popVal.textContent = Math.floor(S.population)+' / '+S.popCap; }
-function updateArmy(){ if(armyVal) armyVal.textContent = S.army; }
-function updateIron(){ if(ironVal) ironVal.textContent = Math.floor(S.iron); }
-function updateBread(){ if(breadVal) breadVal.textContent = Math.floor(S.bread); }
-function updateWood(){ const el=document.getElementById('woodVal'); if(el) el.textContent = Math.floor(S.wood); }
+  setText(moneyVal, Math.floor(S.money)+' / '+S.moneyCap); }
+function updatePop(){ setText(popVal, Math.floor(S.population)+' / '+S.popCap); }
+function updateArmy(){ setText(armyVal, String(S.army)); }
+function updateIron(){ setText(ironVal, String(Math.floor(S.iron))); }
+function updateBread(){ setText(breadVal, String(Math.floor(S.bread))); }
+function updateWood(){ setText(document.getElementById('woodVal'), String(Math.floor(S.wood))); }
 // 1810: piers and ports are built of timber
 function woodCost(type){ return S.currentEra==='1810' ? (WOOD_COSTS[type]||0) : 0; }
 function updateCalendar(){
@@ -459,7 +461,7 @@ function updateCalendar(){
   const day=(totalDays%30)+1;
   const monthIdx=Math.floor(totalDays/30)%12;
   const year=S.START_YEAR+Math.floor(totalDays/360);
-  if(calDate) calDate.textContent=day+' '+MONTHS_TR[monthIdx]+' '+year;
+  setText(calDate, day+' '+MONTHS_TR[monthIdx]+' '+year);
 }
 function monthIndexTotal(){ return Math.floor(Math.floor(S.gameDays)/30); }
 // rebellion chance for a given month scales with tax level (0% at tax<=2, rising after)
@@ -649,8 +651,10 @@ function angerColor(a){
   else { const t=(a-50)/50; r=255; g=Math.round(210-t*210); }
   return 'rgb('+r+','+g+','+b+')';
 }
+let _faceA=-1;
 function updateTaxFace(){
   const a=angerPercent();
+  if(a===_faceA) return; _faceA=a;
   const av=document.getElementById('angerVal'); if(av){ av.textContent='%'+a; av.style.color=angerColor(a); }
   const pct=document.getElementById('taxPct'); if(pct){ pct.textContent=a+'%'; pct.style.color=angerColor(a); }
   const svg=document.getElementById('taxFace'); if(!svg) return;
@@ -679,11 +683,23 @@ function refreshTaxHint(){
 }
 if(taxInput){
   taxInput.value=S.taxPerPerson;
-  taxInput.oninput=()=>{ let v=parseInt(taxInput.value); if(isNaN(v)||v<0)v=0; if(v>2000)v=2000; S.taxPerPerson=v; refreshTaxHint(); };
+  // a new tax counts only once Enter is pressed; typing alone changes nothing (leaving the box puts the old value back)
+  const taxPending=()=>{ const v=parseInt(taxInput.value); return !isNaN(v) && v!==S.taxPerPerson; };
+  taxInput.oninput=()=>{ taxInput.classList.toggle('pending', taxPending());
+    const h=document.getElementById('taxHint'); if(h && taxPending()) h.textContent='⏎ Uygulamak için Enter\'a bas (şu an: '+S.taxPerPerson+')'; else refreshTaxHint(); };
+  taxInput.addEventListener('keydown', e=>{
+    if(e.key==='Enter'){ e.preventDefault(); let v=parseInt(taxInput.value); if(isNaN(v)||v<0)v=0; if(v>2000)v=2000;
+      S.taxPerPerson=v; taxInput.value=v; taxInput.classList.remove('pending'); refreshTaxHint(); hintEl.textContent='💰 Vergi kişi başı '+v+' olarak ayarlandı.'; }
+    else if(e.key==='Escape'){ taxInput.value=S.taxPerPerson; taxInput.classList.remove('pending'); refreshTaxHint(); taxInput.blur(); }
+    e.stopPropagation();   // typing digits must not trigger the game's keyboard shortcuts
+  });
+  taxInput.addEventListener('blur', ()=>{ if(taxPending()){ taxInput.value=S.taxPerPerson; taxInput.classList.remove('pending'); refreshTaxHint(); } });
 }
 refreshTaxHint();
 let lastT = performance.now();
 
+// is there an oil field under a world (scene) XZ point? (2014 only; 1810 has no oil)
+function oilAtXZ(x,z){ if(S.currentEra==='1810') return false; const ll=projection.invert([x+W/2, z+H/2]); return !!ll && oilAt(ll[0], ll[1]); }
 // resource at a world (scene) XZ point
 function resourceAtXZ(x,z){
   const ll=projection.invert([x+W/2, z+H/2]);
@@ -715,21 +731,18 @@ function mineIronPerSec(){
 // ---- resource map overlay ----
 let resourceOverlay=null;
 function buildResourceOverlay(){
+  // the resource map shows oil only (black pools); minerals are found as ore rocks in the region close-up
   resourceOverlay=new THREE.Group();
-  for(const key in DEPOSITS){
-    const col=new THREE.Color(MINERALS[key].color);
-    for(const [lon,lat,r] of DEPOSITS[key]){
-      const p=sceneXZ(lon,lat); if(!p) continue;
-      const radius = r*2.6;  // degrees -> world units (approx)
-      const disc=new THREE.Mesh(new THREE.CircleGeometry(radius,24),
-        new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:0.55, side:THREE.DoubleSide, depthWrite:false}));
-      disc.rotation.x=-Math.PI/2; disc.position.set(p[0], DEPTH+1.0, p[1]);
-      resourceOverlay.add(disc);
-      const ring=new THREE.Mesh(new THREE.RingGeometry(radius*0.96,radius,24),
-        new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:0.95, side:THREE.DoubleSide, depthWrite:false}));
-      ring.rotation.x=-Math.PI/2; ring.position.set(p[0], DEPTH+1.1, p[1]);
-      resourceOverlay.add(ring);
-    }
+  const black=new THREE.MeshBasicMaterial({color:0x0b0b0d, transparent:true, opacity:0.78, side:THREE.DoubleSide, depthWrite:false});
+  const rim=new THREE.MeshBasicMaterial({color:0x2a2a30, transparent:true, opacity:0.95, side:THREE.DoubleSide, depthWrite:false});
+  for(const [lon,lat,r] of OIL_FIELDS){
+    const p=sceneXZ(lon,lat); if(!p) continue;
+    const radius=r*2.6;
+    // a slightly irregular slick instead of a perfect disc
+    const shape=new THREE.Shape(); const N=28, ph=lon*.37+lat*.21;
+    for(let i=0;i<=N;i++){ const a=i/N*Math.PI*2, k=1+.12*Math.sin(a*3+ph)+.07*Math.sin(a*5+ph*2); const x=Math.cos(a)*radius*k, y=Math.sin(a)*radius*k; if(i) shape.lineTo(x,y); else shape.moveTo(x,y); }
+    const disc=new THREE.Mesh(new THREE.ShapeGeometry(shape), black); disc.rotation.x=-Math.PI/2; disc.position.set(p[0], DEPTH+1.0, p[1]); resourceOverlay.add(disc);
+    const ring=new THREE.Mesh(new THREE.RingGeometry(radius*0.97,radius*1.03,32), rim); ring.rotation.x=-Math.PI/2; ring.position.set(p[0], DEPTH+1.05, p[1]); resourceOverlay.add(ring);
   }
   resourceOverlay.visible=false;
   worldGroup.add(resourceOverlay);
@@ -766,6 +779,7 @@ if(gfxBtn){ updateGfxBtn(); gfxBtn.onclick=()=>{
 
 function loop(){
   requestAnimationFrame(loop);
+  if(view==='world') syncLand();
   const now=performance.now();
   const rdt=Math.min(0.1,(now-lastT)/1000); lastT=now;   // real seconds (camera, animation)
   const dt=rdt*gameSpeed;                                 // simulated seconds (economy, calendar, armies)
@@ -987,6 +1001,7 @@ function buildWorld(features){
   { const _t=performance.now();
   addDecorations(features);
   timings.decorations=Math.round(performance.now()-_t); }
+  { const _t=performance.now(); mergeWorldMeshes(); timings.merge=Math.round(performance.now()-_t); }
   { const _t=performance.now();
   buildAllCountryBorders();   // thin white outline for EVERY country (shows sizes & empty lands)
   PI=makeProvinceIndex(PROVS); buildProvinceLines(); rebuildMapNames();
@@ -996,6 +1011,14 @@ function buildWorld(features){
   timings.buildWorld=Math.round(performance.now()-_tb);
 }
 
+// many polylines ([[x,z],...]) as one LineSegments object: a single draw call
+function lineBatch(lines, y, mat){
+  let n=0; for(const l of lines) if(l.length>1) n+=(l.length-1)*2;
+  const a=new Float32Array(n*3); let k=0;
+  for(const l of lines) for(let i=1;i<l.length;i++){ a[k++]=l[i-1][0]; a[k++]=y; a[k++]=l[i-1][1]; a[k++]=l[i][0]; a[k++]=y; a[k++]=l[i][1]; }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(a,3));
+  return new THREE.LineSegments(g, mat);
+}
 // static thin white outline of every country (built once per map)
 let allBordersGroup=null;
 function buildAllCountryBorders(){
@@ -1003,13 +1026,9 @@ function buildAllCountryBorders(){
     allBordersGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); if(o.material)o.material.dispose(); }); }
   allBordersGroup=new THREE.Group();
   const mat=new THREE.LineBasicMaterial({color:0x1b1712, transparent:true, opacity:0.7});   // country borders: dark ink
-  for(const f of (ALL_FEATURES||[])){
-    const polys=countryPolys(f);
-    for(const poly of polys){ const ring=poly[0];
-      const pts=ring.map(c=> new THREE.Vector3(c[0], DEPTH+0.08, -c[1]));
-      if(pts.length>1){ const geo=new THREE.BufferGeometry().setFromPoints(pts);
-        allBordersGroup.add(new THREE.Line(geo, mat)); } }
-  }
+  const rings=[];
+  for(const f of (ALL_FEATURES||[])) for(const poly of countryPolys(f)) rings.push(poly[0].map(c=>[c[0], -c[1]]));
+  allBordersGroup.add(lineBatch(rings, DEPTH+0.08, mat));   // one draw call for every border
   worldGroup.add(allBordersGroup);
 }
 
@@ -1045,7 +1064,7 @@ function autosaveGame(){
   if(!gameId || !worldBuilt || MP) return;
   try{ localStorage.setItem(GAME_KEY+gameId, JSON.stringify({ era:S.currentEra, t:Date.now(), state: S.homeName && gameStarted ? collectState() : null })); }catch(e){}
 }
-setInterval(autosaveGame, 5000);
+setInterval(autosaveGame, 20000);
 addEventListener('pagehide', autosaveGame);
 document.addEventListener('visibilitychange', ()=>{ if(document.hidden) autosaveGame(); });
 
@@ -1066,6 +1085,7 @@ function applyEraUI(era){
   document.getElementById('tankPerLbl').textContent= is1810? 'Top başına' : 'Tank başına';
   document.getElementById('tankBuildBtn').textContent= is1810? 'Top Dök' : 'Tank Üret';
   document.getElementById('tankNote').textContent= is1810? 'Her top orduya +500 güç katar' : 'Her tank orduya +500 güç katar';
+  document.getElementById('resBtn').style.display= is1810? 'none' : '';
   document.getElementById('shipPrice').textContent= is1810? SHIP_COST+' 💰 · '+SHIP_WOOD_1810+' 🪵' : SHIP_COST+' 💰 · 20 petrol · '+SHIP_TECH+' ⚙️';
   updateWood();
 }
@@ -1337,7 +1357,7 @@ function canPlaceAt(type, x, z){
   if(!inSelected(x,z)) return false;
   if(colonyAt(x,z) && (type==='port'||type==='shipyard'||type==='mine')) return false;
   if(type==='port' || type==='shipyard' || type==='fishery'){ if(!isCoast(x,z)) return false; }
-  if(type==='oilwell'){ const pv=provAt(x,z), pr=pv && profileOf(pv.country); if(!pr || pr.mult.oil<.8) return false; }
+  if(type==='oilwell'){ if(!oilAtXZ(x,z)) return false; }
   if(type==='mine'){ if(!resourceAtXZ(x,z)) return false; }
   if(overlapsObstacle(x,z)) return false;   // no building on top of another / on decorations
   return true;
@@ -1368,8 +1388,7 @@ function placeBuilding(point, opts={}){
     }
   }
   if(buildType==='oilwell'){
-    const pv=provAt(point.x, point.z), pr=pv && profileOf(pv.country);
-    if(!pr || pr.mult.oil<.8){ hintEl.textContent='⚠️ '+(pv? pv.country : 'Burada')+' topraklarında çıkarılabilir '+goodLabel('oil', S.currentEra).toLocaleLowerCase('tr')+' yok. Ticaret\'ten alabilirsin.'; return; }
+    if(!oilAtXZ(point.x, point.z)){ hintEl.textContent='⚠️ Burada petrol yatağı yok. Kaynak haritasında (Kaynaklar) siyah alanlara kur ya da Ticaret\'ten satın al.'; return; }
   }
   let mineMineral=null;
   if(buildType==='mine'){
@@ -1602,7 +1621,7 @@ document.getElementById('tankBuildBtn').onclick=()=>{
   if(Math.floor(S.population)<cp){ hintEl.textContent='Yetersiz nüfus! '+n+' '+un+' için '+cp+' kişi gerekli.'; return; }
   if(S.iron<ci){ hintEl.textContent='Yetersiz demir! '+n+' '+un+' için '+ci+' demir gerekli (mevcut: '+Math.floor(S.iron)+').'; return; }
   if(S.goods.tech<ct){ hintEl.textContent='⚙️ Yetersiz teknoloji! '+n+' tank için '+ct+' teknoloji gerekli (elinde '+Math.floor(S.goods.tech)+'). Sanayi fabrikası kur ya da Ticaret\'ten al.'; return; }
-  const co=n*(S.currentEra==='2014'? 15 : 5), oilName=goodLabel('oil', S.currentEra);
+  const co=is1810? 0 : n*15, oilName=goodLabel('oil', S.currentEra);   // cannons need no oil
   if(S.goods.oil<co){ hintEl.textContent='⚠️ Yetersiz '+oilName.toLocaleLowerCase('tr')+'! '+n+' '+un+' için '+co+' gerekli (elinde '+Math.floor(S.goods.oil)+'). Petrol kuyusu kur ya da Ticaret\'ten al.'; return; }
   S.goods.oil-=co; S.goods.tech-=ct;
   S.money-=cm; S.population-=cp; S.iron-=ci; S.tankCount+=n; addTroops(tankMenuProv, n*TANK_ARMY);
@@ -1630,6 +1649,53 @@ function countryAt(feats, x, z){
   return null;
 }
 
+// ---- performance: the world map used to be ~10 000 separate objects (one per province piece, tree, peak and line).
+// After building, the static parts are merged: one mesh for all land, one per decoration material.
+// The province meshes stay (invisible) for clicks, hover and colouring; their colours are copied into the merged mesh.
+let decoGroups=[], landMerged=null, landRanges=[];
+function mergeWorldMeshes(){
+  worldGroup.updateMatrixWorld(true);
+  const inv=new THREE.Matrix4().copy(worldGroup.matrixWorld).invert(), mtx=new THREE.Matrix4();
+  // decorations: bake each part into world-group space, group by look
+  const byLook=new Map();
+  for(const g of decoGroups){ g.traverse(o=>{ if(!o.isMesh) return;
+    const mt=o.material, key=mt.type+'|'+mt.color.getHexString()+'|'+!!mt.flatShading;
+    let geo=o.geometry.index? o.geometry.toNonIndexed() : o.geometry.clone();
+    for(const k of Object.keys(geo.attributes)) if(k!=='position' && k!=='normal') geo.deleteAttribute(k);
+    geo.applyMatrix4(mtx.multiplyMatrices(inv, o.matrixWorld));
+    if(!byLook.has(key)) byLook.set(key, { mat:mt, geos:[], shadow:o.castShadow });
+    byLook.get(key).geos.push(geo); });
+    worldGroup.remove(g); }
+  for(const { mat, geos, shadow } of byLook.values()){ const m=new THREE.Mesh(mergeGeometries(geos), mat); m.castShadow=shadow; m.receiveShadow=true; worldGroup.add(m); geos.forEach(q=>q.dispose()); }
+  decoGroups=[];
+  // land: every province mesh into one, with per-vertex fill/glow kept in sync by syncLand()
+  const geos=[]; landRanges=[]; let off=0;
+  for(const m of countryMeshes){
+    const g=m.geometry.index? m.geometry.toNonIndexed() : m.geometry.clone();
+    g.applyMatrix4(mtx.multiplyMatrices(inv, m.matrixWorld));
+    const n=g.attributes.position.count;
+    g.setAttribute('tint', new THREE.BufferAttribute(new Float32Array(n*3), 3)); g.setAttribute('emis', new THREE.BufferAttribute(new Float32Array(n*3), 3));
+    geos.push(g); landRanges.push({ m, off, n, c:-1, e:-1 }); off+=n;
+    m.visible=false;   // still raycast for clicks and hover (the raycaster ignores visibility)
+  }
+  if(!geos.length) return;
+  landMerged=new THREE.Mesh(mergeGeometries(geos), landMaterialMerged(landTex, landDetail));
+  geos.forEach(q=>q.dispose());
+  landMerged.castShadow=true; landMerged.receiveShadow=true; worldGroup.add(landMerged);
+  syncLand();
+}
+// copy changed province colours / hover glow into the merged land mesh (only the changed ranges are uploaded)
+function syncLand(){
+  if(!landMerged) return;
+  const T=landMerged.geometry.attributes.tint, E=landMerged.geometry.attributes.emis, ta=T.array, ea=E.array;
+  let tDirty=false, eDirty=false;
+  for(const r of landRanges){
+    const mt=r.m.material, c=mt.color.getHex(), e=mt.emissive? mt.emissive.getHex() : 0;
+    if(c!==r.c){ r.c=c; const col=mt.color; for(let i=r.off*3, j=(r.off+r.n)*3; i<j; i+=3){ ta[i]=col.r; ta[i+1]=col.g; ta[i+2]=col.b; } T.addUpdateRange(r.off*3, r.n*3); tDirty=true; }
+    if(e!==r.e){ r.e=e; const col=mt.emissive||{r:0,g:0,b:0}; for(let i=r.off*3, j=(r.off+r.n)*3; i<j; i+=3){ ea[i]=col.r; ea[i+1]=col.g; ea[i+2]=col.b; } E.addUpdateRange(r.off*3, r.n*3); eDirty=true; }
+  }
+  if(tDirty) T.needsUpdate=true; if(eDirty) E.needsUpdate=true;
+}
 function addDecorations(feats){
   const areaCache = new Map();
   function areaOf(f){ if(!f) return 0; if(!areaCache.has(f)) areaCache.set(f, featureArea(f)); return areaCache.get(f); }
@@ -1642,7 +1708,7 @@ function addDecorations(feats){
       const m=mountain(); m.position.set(x,DEPTH,z);
       const s=.2+Math.random()*.12; m.scale.set(s, s*1.25, s);
       m.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
-      worldGroup.add(m);
+      worldGroup.add(m); decoGroups.push(m);
       obstacles.push({x, z, r:7*s+3}); } });
   // forests: only where land sits and host country >= 2x tree footprint
   FOR.forEach(p=>{ const[bx,bz]=sceneXZ(p[0],p[1])||[];
@@ -1653,7 +1719,7 @@ function addDecorations(feats){
       const t=tree(); t.position.set(x,DEPTH,z);
       const s=.32+Math.random()*.16; t.scale.setScalar(s);
       t.traverse(o=>{ if(o.isMesh){ o.castShadow=true; } });
-      worldGroup.add(t);
+      worldGroup.add(t); decoGroups.push(t);
       obstacles.push({x, z, r:3.5*s+2}); } });
 }
 // ---- country selection ----
@@ -1821,7 +1887,7 @@ function goodAdd(k, n){
   else if(k==='iron'){ S.iron=Math.max(0, S.iron+n); updateIron(); }
   else S.goods[k]=Math.max(0, (S.goods[k]||0)+n);
 }
-const eraGoods=()=>S.currentEra==='1810'? GOOD_KEYS.filter(k=>k!=='tech') : GOOD_KEYS;   // 1810: no technology to trade
+const eraGoods=()=>S.currentEra==='1810'? GOOD_KEYS.filter(k=>k!=='tech' && k!=='oil') : GOOD_KEYS;   // 1810: no technology and no oil to trade
 const PRODUCE={ fishery:['fish',1], ranch:['livestock',1], oilwell:['oil',.5], factory:['tech',.3] };
 // per-second output of every good
 function productionRates(){
@@ -1851,17 +1917,36 @@ const techBonus=()=>S.currentEra==='1810'? 0 : Math.min(.3, (S.goods.tech||0)/30
 let marketDrift={}, tradeOffers=[];
 function price(k, side){ const d=marketDrift[k]||1, b=GOODS[k].base*d; return Math.max(1, Math.round(side==='buy'? b*1.25 : b*.8)); }
 function rollTradeOffers(){
-  for(const k of eraGoods()) marketDrift[k]=Math.max(.7, Math.min(1.4, (marketDrift[k]||1)*(.9+Math.random()*.2)));
-  const me=profileOf(S.homeName); if(!me || !bots.length) return;
-  const mine=eraGoods().slice().sort((a,b)=>me.mult[b]-me.mult[a]);
+  const goods=eraGoods();
+  for(const k of goods) marketDrift[k]=Math.max(.7, Math.min(1.4, (marketDrift[k]||1)*(.9+Math.random()*.2)));
+  const me=profileOf(S.homeName); if(!me) return;
+  const mine=goods.slice().sort((a,b)=>me.mult[b]-me.mult[a]);
   tradeOffers=[];
   for(const b of bots.filter(b=>b.owned.size).sort(()=>Math.random()-.5).slice(0,3)){
     const home=b.home && b.owned.has(b.home)? b.home : [...b.owned][0], pr=profileOf(home); if(!pr) continue;
-    // they give what they are best at and we lack; they want what we are good at
-    const give=eraGoods().slice().sort((x,y)=>(pr.mult[y]-me.mult[y])-(pr.mult[x]-me.mult[x]))[0];
-    const want=mine.find(k=>k!==give && pr.mult[k]<=me.mult[k]) || mine[0]; if(want===give) continue;
+    // 2014: oil countries bring oil — half of them barter it, half sell it for money; nobody else keeps asking for oil
+    if(S.currentEra==='2014' && pr.mult.oil>=1.3){
+      const gq=Math.round((60+Math.random()*140)/10)*10;
+      if(Math.random()<.5){ tradeOffers.push({ bot:b.name, color:b.colorHex, country:home, give:'oil', gq, sale:true, price:Math.round(gq*GOODS.oil.base*(.85+Math.random()*.3)) }); continue; }
+      const want=mine.find(k=>k!=='oil' && pr.mult[k]<=me.mult[k]) || mine.find(k=>k!=='oil');
+      tradeOffers.push({ bot:b.name, color:b.colorHex, country:home, give:'oil', gq, want, wq:Math.max(10, Math.round(gq*GOODS.oil.base/GOODS[want].base*.9/5)*5) }); continue;
+    }
+    // they give what they are best at and we lack; they want what we are good at (rarely oil)
+    const give=goods.filter(k=>k!=='oil').sort((x,y)=>(pr.mult[y]-me.mult[y])-(pr.mult[x]-me.mult[x]))[0];
+    const want=mine.find(k=>k!==give && (k!=='oil' || Math.random()<.15) && pr.mult[k]<=me.mult[k]) || mine.find(k=>k!==give && k!=='oil'); if(!want || want===give) continue;
     const gq=Math.round((100+Math.random()*200)/10)*10, wq=Math.max(10, Math.round(gq*GOODS[give].base/GOODS[want].base*.9/5)*5);
     tradeOffers.push({ bot:b.name, color:b.colorHex, country:home, give, gq, want, wq });
+  }
+  // 2014: every month one or two oil states (held by a rival or still independent) come with oil — to barter or for money
+  if(S.currentEra==='2014'){
+    const src=[];
+    for(const c in featByName){ if(c===S.homeName || ownerOf[c]==='player') continue; const pr=profileOf(c); if(!pr || pr.mult.oil<1.3) continue;
+      const bot=ownerOf[c] && botById(ownerOf[c]); src.push({ bot: bot? bot.name : c, color: bot? bot.colorHex : '#3a3a3a', country:c }); }
+    for(let k=0, n=Math.random()<.5? 1 : 2; k<n && src.length; k++){
+      const o=src.splice(Math.floor(Math.random()*src.length),1)[0], gq=Math.round((60+Math.random()*140)/10)*10;
+      if(Math.random()<.5) tradeOffers.push({ ...o, give:'oil', gq, sale:true, price:Math.round(gq*GOODS.oil.base*(.85+Math.random()*.3)) });
+      else { const want=mine.find(k2=>k2!=='oil') || 'grain'; tradeOffers.push({ ...o, give:'oil', gq, want, wq:Math.max(10, Math.round(gq*GOODS.oil.base/GOODS[want].base*.9/5)*5) }); }
+    }
   }
   if(tradePanel.classList.contains('show')) renderTrade();
 }
@@ -1875,7 +1960,8 @@ function renderTrade(){
     eraGoods().map(k=>'<div class="tr-row"><span>'+GOODS[k].icon+' '+goodLabel(k,era)+'</span><b>'+Math.floor(goodGet(k)).toLocaleString('tr-TR')+'</b><span>'+Math.round(rates[k]*30)+'</span>'+
       '<button data-sell="'+k+'" title="100 sat">−100 · +'+price(k,'sell')*100+'</button><button data-buy="'+k+'" title="100 al">+100 · −'+price(k,'buy')*100+'</button></div>').join('');
   document.getElementById('trOffers').innerHTML= tradeOffers.length ? tradeOffers.map((o,i)=>'<div class="tr-offer"><i style="background:'+o.color+'"></i><div><b>'+o.bot+'</b> <small>('+o.country+')</small><br>'+
-    'Verir: <b>'+o.gq+' '+GOODS[o.give].icon+' '+goodLabel(o.give,era)+'</b> · İster: <b>'+o.wq+' '+GOODS[o.want].icon+' '+goodLabel(o.want,era)+'</b></div><button data-offer="'+i+'"'+(goodGet(o.want)<o.wq?' disabled':'')+'>Kabul et</button></div>').join('')
+    (o.sale ? 'Satıyor: <b>'+o.gq+' '+GOODS[o.give].icon+' '+goodLabel(o.give,era)+'</b> · Fiyat: <b>'+o.price.toLocaleString('tr-TR')+' 💰</b></div><button data-offer="'+i+'"'+(S.money<o.price?' disabled':'')+'>Satın al</button></div>'
+      : 'Verir: <b>'+o.gq+' '+GOODS[o.give].icon+' '+goodLabel(o.give,era)+'</b> · İster: <b>'+o.wq+' '+GOODS[o.want].icon+' '+goodLabel(o.want,era)+'</b></div><button data-offer="'+i+'"'+(goodGet(o.want)<o.wq?' disabled':'')+'>Kabul et</button></div>')).join('')
     : '<p class="muted">Bu ay teklif yok. Her ay başında yeni takas teklifleri gelir.</p>';
 }
 document.getElementById('tradePanel').addEventListener('click', e=>{
@@ -1884,6 +1970,10 @@ document.getElementById('tradePanel').addEventListener('click', e=>{
     goodAdd(k,-100); S.money+=price(k,'sell')*100; updateMoney(); }
   else if(b.dataset.buy){ const k=b.dataset.buy, c=price(k,'buy')*100; if(S.money<c){ hintEl.textContent='Yetersiz para: 100 '+goodLabel(k,S.currentEra)+' '+c+' tutuyor.'; return; }
     S.money-=c; updateMoney(); goodAdd(k,100); }
+  else if(b.dataset.offer!=null && tradeOffers[+b.dataset.offer] && tradeOffers[+b.dataset.offer].sale){ const o=tradeOffers[+b.dataset.offer];
+    if(S.money<o.price){ hintEl.textContent='Yetersiz para: '+o.gq+' petrol '+o.price+' tutuyor.'; return; }
+    S.money-=o.price; updateMoney(); goodAdd(o.give, o.gq); tradeOffers.splice(+b.dataset.offer,1);
+    hintEl.textContent='🛢️ '+o.bot+' sana '+o.gq+' petrol sattı ('+o.price.toLocaleString('tr-TR')+' para).'; }
   else if(b.dataset.offer!=null){ const o=tradeOffers[+b.dataset.offer]; if(!o || goodGet(o.want)<o.wq) return;
     goodAdd(o.want,-o.wq); goodAdd(o.give,o.gq); tradeOffers.splice(+b.dataset.offer,1);
     hintEl.textContent='🤝 '+o.bot+' ile takas: '+o.wq+' '+goodLabel(o.want,S.currentEra)+' → '+o.gq+' '+goodLabel(o.give,S.currentEra)+'.'; }
@@ -2045,10 +2135,10 @@ function buildProvinceLines(){
   if(provLinesGroup){ worldGroup.remove(provLinesGroup); provLinesGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); }); }
   provLinesGroup=new THREE.Group();
   const mat=new THREE.LineBasicMaterial({ color:0x1b1712, transparent:true, opacity:.28 });   // province borders: fine ink
+  const parts=[];
   for(const c in PI.byCountry){ if(PI.byCountry[c].length<2) continue;
-    for(const p of PI.byCountry[c]) for(const ring of p.rings) for(const part of splitWrap(ring)){   // never draw across the date line
-      const l=new THREE.Line(new THREE.BufferGeometry().setFromPoints(part.map(q=>new THREE.Vector3(q[0], DEPTH+0.06, -q[1]))), mat);
-      provLinesGroup.add(l); } }
+    for(const p of PI.byCountry[c]) for(const ring of p.rings) for(const part of splitWrap(ring)) parts.push(part.map(q=>[q[0], -q[1]])); }   // never draw across the date line
+  provLinesGroup.add(lineBatch(parts, DEPTH+0.06, mat));
   worldGroup.add(provLinesGroup);
 }
 
@@ -3570,6 +3660,7 @@ function regionInfoFor(idOrName){
     isPlayer, ownerColor, ownerName, ownerCulture: isPlayer ? cultureOfCountry(S.homeName) : null, buildings, devLevel:devLvl, devName: isPlayer ? SETTLE_NAMES[settle] : DEV_LEVELS[devLvl][1], profile:(profileOf(country)||{}).mult,
     landmark: isPlayer ? settle>=2 : (p.capital || devLvl>=3), walls: isPlayer ? settle>=2 : (p.capital || devLvl>=3),
     // ours: no ready-made fields (every field is one we built), 3–5 cottages that grow with each upgrade, felled woods stay felled
+    ores: isPlayer ? oreKindsFor(p) : [], dug: isPlayer ? (S.dug[p.id]||[]) : [],
     noFields: isPlayer, houses: isPlayer ? [3 + hashStr(p.id) % 3, 11, 22, 22][settle] : null, settle, cleared: isPlayer ? (S.cleared[p.id]||[]) : [],
     army: troops, vehicles: S.currentEra==='2014' ? Math.min(3, Math.ceil(S.tankCount/3)) : Math.min(3, Math.floor(troops/15000)) };
 }
@@ -3585,7 +3676,7 @@ async function enterRegion(name){
   try{
     getRegionView();
     regionView.battleSource = regionBattleState;
-    const sig = name + '|' + info.era + '|' + info.ownerColor + '|' + info.settle + '|' + info.cleared.length + '|' + info.buildings.map(b => b.type + b.x.toFixed(1)).join(',')
+    const sig = name + '|' + info.era + '|' + info.ownerColor + '|' + info.settle + '|' + info.cleared.length + '|' + info.dug.length + '|' + info.buildings.map(b => b.type + b.x.toFixed(1)).join(',')
       + '|' + Math.round(info.army/400) + '|' + (regionBattleState(name) ? 'battle' : '');
     if(sig !== regionSig || !regionView.scene){ regionView.build(info); regionSig = sig; }
     regionView.setLighting(currentSky());
@@ -3702,6 +3793,7 @@ function regionLegal(type, rx, rz){
   if(!p || p.id!==regionName || !ownsProv(p.id)) return false;   // build inside this province only
   if(colonyAt(wx, wz) && (type==='port'||type==='shipyard'||type==='mine')) return false;
   if(type==='mine' && !resourceAtXZ(wx, wz)) return false;
+  if(type==='oilwell' && !oilAtXZ(wx, wz)) return false;
   return S.money>=(COSTS[type]||0) && S.wood>=woodCost(type) && (type!=='city'||S.bread>=CITY_BREAD_COST) && (type!=='town'||S.bread>=TOWN_BREAD_COST);
 }
 // why the preview is red, in words
@@ -3714,6 +3806,7 @@ function regionWhy(type, g){
   const [wx, wz]=regionToWorld(g.x, g.z), p=provAt(wx, wz);
   if(!p || p.id!==regionName || !ownsProv(p.id)) return '⚠️ Yalnızca bu bölgenin sınırları içine inşa edebilirsin.';
   if(type==='mine' && !resourceAtXZ(wx, wz)) return '⛏️ Burada maden yatağı yok.';
+  if(type==='oilwell' && !oilAtXZ(wx, wz)) return '🛢️ Burada petrol yatağı yok — kaynak haritasındaki siyah alanlara kurulur.';
   if(colonyAt(wx, wz) && (type==='port'||type==='shipyard'||type==='mine')) return '⚠️ Sömürgeye liman, tersane ve maden kurulamaz.';
   if(S.money<(COSTS[type]||0)) return '💰 Yetersiz para: '+b_label(type)+' '+COSTS[type]+' tutuyor.';
   if(S.wood<woodCost(type)) return '🪵 Yetersiz odun: '+b_label(type)+' için '+woodCost(type)+' odun gerekli (elinde '+Math.floor(S.wood)+').';
@@ -3763,6 +3856,47 @@ renderer.domElement.addEventListener('pointerup', e=>{
   if(placedBuildings.length>before){ regionView.addBuilding(type, g.x, g.z, g.rot); regionSig=null; }
 });
 
+// ---- ore rocks: every province of ours has a few; the real deposit under it (resource data) shows up most
+const DIG_COST=1000, DIG_SECS=7, DIG_MULT=8;   // a rock pays out what a mine would earn in 8 minutes, in one go
+const ORE_NAME={ gold:'Altın', silver:'Gümüş', copper:'Bakır', iron:'Demir', diamond:'Elmas' };
+function oreKindsFor(p){
+  const rnd=makeRng(hashStr('ores|'+p.id)), n=3+Math.floor(rnd()*3), dep=resourceAtXZ(p.center[0], p.center[1]), out=[];
+  const pool=[['iron',.3],['copper',.3],['silver',.2],['gold',.14],['diamond',.06]];
+  for(let i=0;i<n;i++){
+    if(dep && i<2){ out.push(dep); continue; }
+    let r=rnd(); out.push((pool.find(([,w])=>(r-=w)<=0)||pool[0])[0]);
+  }
+  return out;
+}
+function orePayout(mineral, prov){
+  const m=MINERALS[mineral]; if(!m) return { money:0, iron:0 };
+  return { money:Math.round((m.value||0)*DIG_MULT*specGood(prov,'money')), iron:Math.round((m.iron||0)*DIG_MULT*specGood(prov,'iron')) };
+}
+const payText=p=>p.money? '+'+p.money.toLocaleString('tr-TR')+' 💰' : '+'+p.iron+' ⛓️ demir';
+function offerOre(e, rock){
+  hideWoodPop();
+  const pay=orePayout(rock.mineral, regionName);
+  woodPick={ rock, prov:regionName };
+  document.getElementById('woodPopTitle').textContent='⛏️ '+ORE_NAME[rock.mineral]+' cevheri';
+  document.getElementById('woodPopBtn').innerHTML='⛏️ Kaz ('+DIG_COST.toLocaleString('tr-TR')+' 💰) <b>'+payText(pay)+'</b>';
+  document.getElementById('woodPopNote').textContent='Madenciler '+DIG_SECS+' saniye kazar; kaya parçalanır, cevher tek seferde gelir.';
+  const r=renderer.domElement.getBoundingClientRect();
+  woodPop.style.left=Math.min(r.width-230, Math.max(8, e.clientX-r.left+12))+'px'; woodPop.style.top=Math.min(r.height-110, Math.max(8, e.clientY-r.top-20))+'px';
+  woodPop.classList.add('show');
+}
+function startDig(){
+  const { rock, prov }=woodPick;
+  if(S.money<DIG_COST){ hintEl.textContent='💰 Kazmak için '+DIG_COST+' para gerekli (elinde '+Math.floor(S.money)+').'; return; }
+  S.money-=DIG_COST; updateMoney();
+  const job=regionView.startChop([], DIG_SECS, r=>{
+    (S.dug[prov]||(S.dug[prov]=[])).push(r.index); regionSig=null;
+    const pay=orePayout(r.mineral, prov);
+    S.money+=pay.money; S.iron+=pay.iron; updateMoney(); updateIron();
+    hintEl.textContent='⛏️ '+ORE_NAME[r.mineral]+' cevheri çıkarıldı: '+payText(pay)+'.';
+    if(job) job.woodText=payText(pay);
+  }, rock);
+  if(job) hintEl.textContent='⛏️ Madenciler kayaya gidiyor…';
+}
 // ---- woodcutting: click a wood in one of our regions → the villagers fell it (5 s) → wood (1810) / cleared land
 const woodPop=document.getElementById('woodPop');
 let woodPick=null;
@@ -3770,9 +3904,12 @@ function hideWoodPop(){ woodPop.classList.remove('show'); woodPick=null; if(regi
 function offerWood(e){
   hideWoodPop();
   if(!regionView || !regionView.info || !regionView.info.isPlayer) return;
+  const rock=regionView.rockAt(...ndcOf(e));
+  if(rock){ if((regionView.jobs||[]).length>=3){ hintEl.textContent='⛏️ İşçilerin hepsi şu an çalışıyor — biraz bekle.'; return; } return offerOre(e, rock); }
   const g=regionView.pickGround(...ndcOf(e)); if(!g) return;
   const trees=regionView.forestAt(g.x, g.z); if(!trees) return;
   if((regionView.jobs||[]).length>=3){ hintEl.textContent='🪓 Oduncuların hepsi şu an çalışıyor — biraz bekle.'; return; }
+  document.getElementById('woodPopNote').textContent='Köylüler 5 saniye çalışır; ağaçlar devrilir, yerine inşaat yapılabilir.';
   woodPick={ trees, prov:regionName };
   regionView.highlightTrees(trees);
   const wood=trees.length*WOOD_PER_TREE, is1810=S.currentEra==='1810';
@@ -3784,6 +3921,7 @@ function offerWood(e){
 }
 document.getElementById('woodPopBtn').onclick=()=>{
   if(!woodPick || !regionView || regionName!==woodPick.prov) return hideWoodPop();
+  if(woodPick.rock){ startDig(); woodPop.classList.remove('show'); woodPick=null; return; }
   const { trees, prov }=woodPick; regionView.highlightTrees(null);
   const job=regionView.startChop(trees, 5, felled=>{
     const n=felled.length, list=S.cleared[prov]||(S.cleared[prov]=[]);
@@ -3841,7 +3979,7 @@ function savedTroops(){
 }
 function collectState(){
   return {
-    ...pick(S, ['money','moneyCap','population','popCap','army','iron','tankCount','bread','wood','settle','cleared','taxPerPerson','ideology','personality','gameDays',
+    ...pick(S, ['money','moneyCap','population','popCap','army','iron','tankCount','bread','wood','settle','cleared','dug','taxPerPerson','ideology','personality','gameDays',
       'fieldCount','farmCount','chocoCount','shipCount','portShipyardCount','cityCount','townCount','baseCount','nonChocoBuildings',
       'homeName','selectedName','troops','goods','fed','spec']),
     troops: savedTroops(),
@@ -3871,7 +4009,7 @@ function clearWorldObjects(){
   S.fieldCount=S.farmCount=S.chocoCount=S.shipCount=S.portShipyardCount=S.cityCount=S.townCount=S.baseCount=S.nonChocoBuildings=0;
   S.freeCityCount=0;
   S.bankCount=0; S.moneyCap=5000; S.iron=0; S.tankCount=0;
-  S.wood=0; S.settle={}; S.cleared={};
+  S.wood=0; S.settle={}; S.cleared={}; S.dug={};
   S.money=2500; S.bread=0; S.taxPerPerson=2; S.gameDays=0; S.lastMonthCounted=0; S.rebellionActive=false; S.ideology=null; S.personality=null; S._upkeepDebt=0;
   if(typeof rebelFires!=='undefined'){ rebelFires.forEach(fo=>{ if(fo.group) worldGroup.remove(fo.group); }); rebelFires=[]; }
   const dv=document.getElementById('dangerVignette'); if(dv) dv.classList.remove('show');
@@ -3889,7 +4027,7 @@ function applyState(st){
   clearWorldObjects();
   S.money=st.money; S.moneyCap=st.moneyCap||5000; S.population=st.population; S.popCap=st.popCap; S.army=st.army;
   S.iron=st.iron||0; S.tankCount=st.tankCount||0;
-  S.wood=st.wood||0; S.settle={ ...(st.settle||{}) }; S.cleared={ ...(st.cleared||{}) };
+  S.wood=st.wood||0; S.settle={ ...(st.settle||{}) }; S.cleared={ ...(st.cleared||{}) }; S.dug={ ...(st.dug||{}) };
   S.bread=st.bread||0; S.taxPerPerson=(st.taxPerPerson!=null?st.taxPerPerson:2); S.ideology=st.ideology||null;
   S.personality=st.personality||null;
   S.gameDays=st.gameDays||0;
@@ -3996,6 +4134,10 @@ if(gameId){
 if (new URLSearchParams(location.search).has('test')) {
   window.__mbr = {
     get post(){ return post; },
+    stats(){ const r=renderer.info.render; let meshes=0, inst=0, lines=0; scene.traverse(o=>{ if(o.visible===false) return; if(o.isInstancedMesh) inst++; else if(o.isMesh) meshes++; else if(o.isLine||o.isLineSegments) lines++; }); return { calls:r.calls, tris:r.triangles, meshes, inst, lines, geos:renderer.info.memory.geometries, tex:renderer.info.memory.textures }; },
+    sceneRoot(){ return scene; },
+    rollOffers(){ rollTradeOffers(); return tradeOffers.map(o=>({ ...o })); }, resMap(){ resBtn.click(); return !!(resourceOverlay && resourceOverlay.visible); },
+    renderOnce(){ renderer.info.reset(); renderer.info.autoReset=false; },
     regionSky(s, n=0){ if(regionView && regionView.scene) regionView.setLighting({ s, n }); },
     get worldBuilt(){ return worldBuilt; },
     snapshot(){ return { ...pick(S, ['money','population','popCap','army','bread','gameDays','ideology','personality']),

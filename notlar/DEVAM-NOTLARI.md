@@ -145,6 +145,14 @@ Claude Code hafızası proje yoluna göre bir klasörde durur:
 6. **Dönem kuralları:** 1810'da odun HUD'da; liman 40🪵, tersane 60🪵, balıkçı limanı 25🪵, yelkenli gemi 30🪵 ister. 1810'da teknoloji yok (HUD, ticaret, sanayi fabrikası gizli; saldırı bonusu yok); garaj → **Top Dökümhanesi**, tank → **top** (1000💰 + 10 nüfus + 20 demir + 5 kömür). 2014'te tank 10⚙️, savaş gemisi 25⚙️ teknoloji ister.
 7. Blender betiği (`blender/human.py`) artık açık Blender içinde de çalışıyor (fabrika ayarına dönmeden sahneyi boşaltır); MCP ile `-- <models klasörü> worker_1810 …` argümanlarıyla çalıştırıldı.
 
+**31 Ekim:**
+1. **Performans (kasma):** dünya haritası karede ~24 000 çizim çağrısı yapıyordu (5 232 il parçası + 4 313 çizgi + dağ/ağaç parçaları). Artık tüm kara tek ağ (il renkleri ve vurgulama köşe başına `tint`/`emis` niteliğiyle; asıl il ağları görünmez ama tıklama/hover için duruyor — `mergeWorldMeshes`, `syncLand`), sınırlar ve il çizgileri tek `LineSegments`, süsler malzeme başına tek ağ → ~840 çağrı. Bölge: ağaç tepeleri 900 → 400 üçgen, dış kırsal ağaçları daha da sade; kare başına üçgen ~%45 azaldı. HUD yazıları yalnız değer değişince yazılıyor (vergi yüzü SVG'si her kare yeniden kuruluyordu). Otomatik kayıt 5 sn → 20 sn.
+2. **Odun göstergesi** üst çubukta Para'nın hemen yanında (1810).
+3. **Vergi** yalnız Enter'a basınca uygulanıyor; yazarken kutu sarı çerçeveli, kutudan çıkınca eski değere dönüyor.
+4. **Petrol:** 1810'da petrol/kömür malı, petrol kuyusu ve Kaynaklar düğmesi yok; top petrol istemez. 2014'te kaynak haritası yalnız petrol yataklarını **siyah** gösterir (`data/resources.js` → `OIL_FIELDS`); petrol kuyusu yalnız oraya kurulur. Ticaret: petrol zengini botlar petrolü takasla verir ya da parayla satar; diğerleri nadiren petrol ister.
+5. **Madenler:** Maden Ocağı menüden kalktı, kaynak haritası maden göstermez. Kendi her bölgende 3–5 **cevherli kaya** (altın/gümüş/bakır/demir/elmas; bölgenin altındaki gerçek yatak ilk ikisini belirler). Kayaya tıkla → 1000💰 ile kaz → 3 Blender madenci (`miner_*`: kazma) 7 sn kazar, kaya parçalanır, bir madenin **8 dakikalık** geliri tek seferde gelir (demir: 80 demir). Kazılan kayalar kayıtta (`S.dug`). (`main.js` → `DIG_COST`, `DIG_SECS`, `DIG_MULT`)
+6. Blender bilgisayarda kapalıyken modeller bu ortamda `pip install bpy==5.2.3` (aynı sürüm) ile üretildi.
+
 ---
 
 ## 7. Test durumu (son çalıştırma)

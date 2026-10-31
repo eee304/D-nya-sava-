@@ -26,6 +26,14 @@ const GHOST_OK = '#4aa8ff', GHOST_BAD = '#ff4f45';   // placement preview: blue 
 const FIELD_COLORS = ['#c3a24a', '#7f9a3c', '#b8933f', '#9aa646', '#c9ac57', '#8c8a3a', '#a9a248'];   // same as the painted ground (terrain.js)
 export const treeKey = (x, z) => x.toFixed(2) + ',' + z.toFixed(2);
 const RIGS_HAVE = n => !!RIGS[n];
+// how each ore looks on its rock: colour, lustre, a second tint (patina / dark iron) and the host stone
+const ORES = {
+  gold: { color: '#f0c03a', alt: '#ffe07a', metal: .9, rough: .3, glow: '#6a4a00', rock: '#9a958c' },
+  silver: { color: '#e8ecf2', alt: '#b8c0ca', metal: .9, rough: .2, glow: '#3a3e46', rock: '#6f6b66' },
+  copper: { color: '#d98c45', alt: '#3fb092', metal: .85, rough: .32, glow: '#4a2200', rock: '#8e8a84' },
+  iron: { color: '#5c616b', alt: '#a8482a', metal: .75, rough: .4, glow: '#101216', rock: '#a39c92' },
+  diamond: { color: '#c9f5ff', alt: '#e9fbff', metal: 0, rough: .04, glow: '#5ac8e8', clear: true, rock: '#5d6168' },
+};
 
 export class RegionView {
   constructor(renderer, { keys, labelsEl, onExit, post, env }) {
@@ -130,6 +138,18 @@ export class RegionView {
     // everything later placement (incl. buildings added by the player in this view) needs
     this._ctx = { T, rng, culture, era, obstacles, occupied, freeSpot, findSpot, roadAngle, town, ownerTex, patches, typeR };
 
+    // ---- ore rocks (our provinces): boulders studded with the ore's colour; dug ones leave rubble
+    this.rocks = []; this.rockGroup = new THREE.Group(); scene.add(this.rockGroup);
+    if (info.ores && info.ores.length) {
+      const orng = makeRng(hashStr(info.name + '|ore')), dug = new Set(info.dug || []);
+      for (let i = 0, tries = 0; i < info.ores.length && tries < 600; tries++) {
+        const a = orng() * Math.PI * 2, d = 26 + orng() * 50, x = Math.cos(a) * d, z = Math.sin(a) * d;
+        if (T.H(x, z) < .6 || T.slope(x, z) > .7 || T.riverDist(x, z) < 4 || T.roadDist(x, z) < 3 || Math.abs(x) > HALF - 8 || Math.abs(z) > HALF - 8) continue;
+        if (this.rocks.some(r => Math.hypot(r.x - x, r.z - z) < 14)) continue;
+        const rock = this.makeRock(i, ORES[info.ores[i]] ? info.ores[i] : 'copper', x, z, orng, dug.has(i));
+        obstacles.push([x, z, rock.r + .6]); i++;
+      }
+    }
     // ---- the player's buildings (mapped from their world-map positions)
     this.placed = [];
     for (const b of info.buildings) {
@@ -493,32 +513,100 @@ export class RegionView {
     m.setMatrixAt(m.count++, o.matrix); m.instanceMatrix.needsUpdate = true;
   }
 
+  // a weathered boulder breaking out of the ground, studded with ore of its mineral's colour and lustre
+  makeRock(index, mineral, x, z, rng, dug) {
+    const T = this.T, y = T.H(x, z), g = new THREE.Group(), o = ORES[mineral], r = 1.15 + rng() * .35;
+    g.position.set(x, y, z); g.rotation.y = rng() * 6.3;
+    const rec = { index, mineral, x, z, r, g, dug, busy: false };
+    if (dug) { this.makeRubble(x, z, r, rng); this.rocks.push(rec); return rec; }
+    const rockGeo = (rad, sx, sy, sz, seed) => {
+      const q = new THREE.IcosahedronGeometry(rad, 1), p = q.attributes.position;
+      for (let k = 0; k < p.count; k++) { const vx = p.getX(k), vy = p.getY(k), vz = p.getZ(k), n = 1 + Math.sin(vx * 5.1 + seed) * .12 + Math.cos(vz * 4.3 + seed * 1.7) * .12 + Math.sin(vy * 6.7 + seed * .5) * .07;
+        p.setXYZ(k, vx * n * sx, Math.max(vy * n * sy, -rad * .25), vz * n * sz); }
+      q.computeVertexNormals(); return q;
+    };
+    const stone = new THREE.MeshStandardMaterial({ color: new THREE.Color(o.rock).offsetHSL(0, 0, (rng() - .5) * .06), roughness: .92, flatShading: true });
+    const main = new THREE.Mesh(rockGeo(r, 1.25, .78, 1.05, rng() * 9), stone); main.position.y = .05;
+    const side = new THREE.Mesh(rockGeo(r * .55, 1.1, .7, 1, rng() * 9), stone); side.position.set(r * .95, 0, r * .25);
+    for (const m of [main, side]) { m.castShadow = true; m.receiveShadow = true; g.add(m); }
+    // ore: nuggets / crystals pushed into the upper surface, plus a few small flecks
+    const ore = new THREE.MeshStandardMaterial({ color: '#ffffff', metalness: o.metal, roughness: o.rough, emissive: new THREE.Color(o.glow || '#000000'), emissiveIntensity: .6,
+      transparent: !!o.clear, opacity: o.clear ? .88 : 1, envMap: this.env || null, envMapIntensity: 1.3, flatShading: true });
+    const geo = mineral === 'diamond' ? new THREE.OctahedronGeometry(1, 0) : new THREE.DodecahedronGeometry(1, 0);
+    // the ore comes out in two or three veins: clusters of flat, half-buried pieces lying along the stone's surface
+    const n = 32 + Math.floor(rng() * 8), ores = new THREE.InstancedMesh(geo, ore, n), d = new THREE.Object3D(), ray = new THREE.Raycaster(), hits = [];
+    const up = new THREE.Vector3(0, 1, 0), nm = new THREE.Matrix3(), nv = 3 + Math.floor(rng() * 2), v0 = rng() * 6.3, veins = [...Array(nv)].map((_, i) => [v0 + i / nv * Math.PI * 2 + (rng() - .5) * .5, .6 + rng() * .65]);   // all the way round, on the flanks
+    main.updateMatrixWorld(true); g.updateMatrixWorld(true); nm.getNormalMatrix(main.matrixWorld);
+    for (let k = 0; k < n; k++) {
+      const [vt, vp] = veins[k % veins.length], th = vt + (rng() - .5) * .7, ph = Math.max(.15, Math.min(1.35, vp + (rng() - .5) * .45));
+      const dir = new THREE.Vector3(Math.cos(th) * Math.sin(ph), Math.cos(ph), Math.sin(th) * Math.sin(ph));
+      ray.set(dir.clone().multiplyScalar(r * 3).add(g.position), dir.clone().negate()); hits.length = 0; main.raycast(ray, hits);
+      const hit = hits.sort((a, b) => a.distance - b.distance)[0];
+      const hp = hit ? hit.point.clone().sub(g.position) : dir.clone().multiplyScalar(r * .8), n0 = hit ? hit.face.normal.clone().applyMatrix3(nm).normalize() : dir.clone();
+      hp.applyAxisAngle(up, -g.rotation.y); n0.applyAxisAngle(up, -g.rotation.y);
+      const big = k < veins.length * 3, s = (big ? .22 : .11) + rng() * (big ? .1 : .06);
+      d.quaternion.setFromUnitVectors(up, n0).multiply(new THREE.Quaternion().setFromAxisAngle(up, rng() * 6.3));
+      d.position.copy(hp).addScaledVector(n0, s * .05);
+      if (mineral === 'diamond') d.scale.set(s * .8, s * 1.6, s * .8);   // crystals stand out of the rock
+      else d.scale.set(s * (1 + rng() * .5), s * .62, s * (.75 + rng() * .35));   // metal ore: low lumps along the seam
+      d.updateMatrix(); ores.setMatrixAt(k, d.matrix);
+      ores.setColorAt(k, new THREE.Color(k % 4 === 3 && o.alt ? o.alt : o.color).offsetHSL(0, 0, (rng() - .5) * .08));
+    }
+    ores.castShadow = true; g.add(ores);
+    this.rockGroup.add(g); this.clearTrees(x, z, r + 1.2);
+    rec.base = g.scale.clone(); this.rocks.push(rec);
+    return rec;
+  }
+  // what is left after digging: a scatter of broken stone
+  makeRubble(x, z, r, rng) {
+    const T = this.T, K = new Kit();
+    for (let k = 0; k < 11; k++) { const a = rng() * 6.3, d = Math.sqrt(rng()) * r, px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d; K.part(K.M4(px, T.H(px, pz), pz, rng() * 6), new THREE.DodecahedronGeometry(.1 + rng() * .16, 0), k % 3 ? '#8f877b' : '#a39a8c', 0, .04, 0); }
+    K.flush(this.scene);
+  }
+  rockAt(ndcX, ndcY) {
+    if (!this.rockGroup || !this.rockGroup.children.length) return null;
+    const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.cam);
+    const hit = ray.intersectObject(this.rockGroup, true)[0]; if (!hit) return null;
+    let g = hit.object; while (g && g.parent !== this.rockGroup) g = g.parent;
+    return this.rocks.find(r => r.g === g && !r.dug && !r.busy) || null;
+  }
+  // k = 0..1: the rock sinks, shrinks and throws up dust; at 1 it is replaced by rubble
+  crumbleRock(rock, k) {
+    if (!rock || rock.dug) return;
+    const e = k * k; rock.g.scale.set(1 - e * .85, 1 - e, 1 - e * .85); rock.g.position.y = this.T.H(rock.x, rock.z) - e * .4;
+    if (this.fx && Math.random() < .35) this.fx.puff(rock.x + (Math.random() - .5) * rock.r * 2, this.T.H(rock.x, rock.z) + .3, rock.z + (Math.random() - .5) * rock.r * 2, .6, 1.8, '#b5aca0', .5);
+    if (k >= 1) { rock.dug = true; this.rockGroup.remove(rock.g); this.makeRubble(rock.x, rock.z, rock.r, makeRng(rock.index + 7)); }
+  }
   // woodcutters walk out to the trees, chop for `secs` seconds, the trees fall, then onDone(trees) and they go home
-  startChop(trees, secs, onDone) {
-    if (!this.scene || !trees.length) return null;
-    const T = this.T, info = this.info;
+  startChop(trees, secs, onDone, rock = null) {
+    if (!this.scene || (!trees.length && !rock)) return null;
+    const T = this.T, info = this.info, kind = rock ? 'ore' : 'wood';
     for (const t of trees) t.busy = true;
-    let cx = 0, cz = 0; for (const t of trees) { cx += t.x; cz += t.z; } cx /= trees.length; cz /= trees.length;
+    if (rock) rock.busy = true;
+    let cx = 0, cz = 0; for (const t of trees) { cx += t.x; cz += t.z; } if (rock) { cx = rock.x; cz = rock.z; } else { cx /= trees.length; cz /= trees.length; }
     // where they come from: the nearest road, else straight from the village
     let sp = null, sd = 1e9;
     for (const r of T.ROADS) for (let s0 = 0, L = polyLen(r); s0 < L; s0 += 2) { const q = along(r, s0), d = Math.hypot(q.x - cx, q.z - cz); if (d < sd && T.H(q.x, q.z) > .3) { sd = d; sp = [q.x, q.z]; } }
     if (!sp || sd > 16) { const d = Math.hypot(cx, cz) || 1, k = Math.max(0, d - 12) / d; sp = [cx * k, cz * k]; }
     const edge = trees.slice().sort((a, b) => Math.hypot(a.x - sp[0], a.z - sp[1]) - Math.hypot(b.x - sp[0], b.z - sp[1]));
-    const n = Math.max(2, Math.min(4, Math.ceil(trees.length / 8))), workers = [];
+    const n = rock ? 3 : Math.max(2, Math.min(4, Math.ceil(trees.length / 8))), workers = [];
+    const a0 = Math.atan2(sp[1] - cz, sp[0] - cx);   // miners stand round the rock on the side they come from
     const pick = a => a[Math.floor(Math.random() * a.length)];
     for (let i = 0; i < n; i++) {
-      const tree = edge[Math.min(edge.length - 1, i * 2)], name = humanName('worker', info.era, info.culture), h = makeHuman(RIGS_HAVE(name) ? name : humanName('civ', info.era, info.culture), {
+      const tree = rock || edge[Math.min(edge.length - 1, i * 2)], name = humanName(rock ? 'miner' : 'worker', info.era, info.culture), h = makeHuman(RIGS_HAVE(name) ? name : humanName('civ', info.era, info.culture), {
         team: pick(info.era === '2014' ? ['#c8463a', '#3f6fa8', '#e07a2a', '#5a8a4a'] : ['#6b4a32', '#8a3a28', '#3f5a3a', '#c9b48a', '#a85a3a']),
         pants: pick(info.era === '2014' ? ['#2f4a6a', '#3a3a3e', '#6b5a48'] : ['#4a3a2a', '#5e4630', '#3a3836', '#6b5236']), skin: pick(['#f2cfb0', '#e0b48c', '#c99470', '#9a6a48']) });
       if (!h) continue;
       const dx = tree.x - sp[0], dz = tree.z - sp[1], dl = Math.hypot(dx, dz) || 1;
-      const st = { x: tree.x - dx / dl * .55, z: tree.z - dz / dl * .55 };   // stand just in front of the trunk
+      const ang = a0 + (i - (n - 1) / 2) * .85;
+      const st = rock ? { x: rock.x + Math.cos(ang) * (rock.r + .55), z: rock.z + Math.sin(ang) * (rock.r + .55) }   // round the rock
+        : { x: tree.x - dx / dl * .55, z: tree.z - dz / dl * .55 };   // just in front of the trunk
       const ox = (Math.random() - .5) * 1.2, oz = (Math.random() - .5) * 1.2;
       h.g.scale.setScalar(.52); h.g.position.set(sp[0] + ox, T.H(sp[0] + ox, sp[1] + oz), sp[1] + oz); this.scene.add(h.g);
       workers.push({ h, x: sp[0] + ox, z: sp[1] + oz, st, tree, home: [sp[0] + ox, sp[1] + oz], yaw: Math.atan2(dx, dz), ph: Math.random() * 6 });
     }
     const label = document.createElement('div'); label.className = 'rl chop'; this.labelsEl.appendChild(label);
-    const job = { trees, workers, secs, onDone, phase: 'walk', t: 0, fall: 0, label, sp, pos: new THREE.Vector3(cx, T.H(cx, cz) + 3.2, cz) };
+    const job = { kind, rock, trees, workers, secs, onDone, phase: 'walk', t: 0, fall: 0, label, sp, pos: new THREE.Vector3(cx, T.H(cx, cz) + 3.2, cz) };
     this.labels.push({ el: label, pos: job.pos });
     this.jobs.push(job);
     return job;
@@ -529,6 +617,7 @@ export class RegionView {
     this.jobs = [];
   }
   fellNow(j) {
+    if (j.kind === 'ore') { this.crumbleRock(j.rock, 1); if (j.phase !== 'home') { j.phase = 'home'; j.onDone && j.onDone(j.rock); } return; }
     const zero = new THREE.Matrix4().makeScale(0, 0, 0), touched = new Set();
     for (const t of j.trees) { if (t.dead) continue; t.dead = true; t.busy = false; for (const m of t.meshes) { m.setMatrixAt(t.i, zero); touched.add(m); } this.addStump(t.x, t.z, t.s, t.r); }
     for (const m of touched) m.instanceMatrix.needsUpdate = true;
@@ -545,7 +634,10 @@ export class RegionView {
       j.t += dt;
       if (j.phase === 'walk' && (j.workers.every(w => w.arrived) || j.t > 14)) { j.phase = 'chop'; j.t = 0; }
       if (j.phase === 'chop' && j.t >= j.secs) { j.phase = 'fall'; j.t = 0; }
-      if (j.phase === 'fall') {   // trees topple one after another, away from the cutters
+      if (j.phase === 'fall' && j.kind === 'ore') {   // the rock cracks apart into rubble
+        this.crumbleRock(j.rock, Math.min(1, j.t / .9));
+        if (j.t >= .9) { j.phase = 'home'; j.t = 0; j.onDone && j.onDone(j.rock); }
+      } else if (j.phase === 'fall') {   // trees topple one after another, away from the cutters
         const touched = new Set();
         j.trees.forEach((t, i) => {
           if (t.dead) return;
@@ -559,7 +651,9 @@ export class RegionView {
         for (const m of touched) m.instanceMatrix.needsUpdate = true;
         if (j.trees.every(t => t.dead)) { j.phase = 'home'; j.t = 0; j.onDone && j.onDone(j.trees); }
       }
-      j.label.textContent = j.phase === 'walk' ? '🪓 Oduncular yolda…' : j.phase === 'chop' ? '🪓 Odun toplanıyor · ' + Math.ceil(j.secs - j.t) + ' sn' : j.phase === 'fall' ? '🌲 Ağaçlar devriliyor…' : j.woodText || '';
+      j.label.textContent = j.kind === 'ore'
+        ? (j.phase === 'walk' ? '⛏️ Madenciler yolda…' : j.phase === 'chop' ? '⛏️ Kazılıyor · ' + Math.ceil(j.secs - j.t) + ' sn' : j.phase === 'fall' ? '💥 Kaya parçalanıyor…' : j.woodText || '')
+        : (j.phase === 'walk' ? '🪓 Oduncular yolda…' : j.phase === 'chop' ? '🪓 Odun toplanıyor · ' + Math.ceil(j.secs - j.t) + ' sn' : j.phase === 'fall' ? '🌲 Ağaçlar devriliyor…' : j.woodText || '');
       if (j.phase === 'home' && j.t > 2.2) j.label.style.opacity = Math.max(0, 1 - (j.t - 2.2) / .8);
       for (const w of j.workers) {
         let tx, tz, moving = false;
@@ -572,7 +666,10 @@ export class RegionView {
         const chopping = j.phase === 'chop' && !moving;
         w.h.play(moving ? 'walk' : chopping && w.h.acts.chop ? 'chop' : 'idle', dt, moving ? 1.4 / (.36 * .52) : 1);
         // chips fly at each stroke
-        if (chopping && this.fx && Math.random() < dt * 1.6) this.fx.puff(w.tree.x, T.H(w.tree.x, w.tree.z) + .25, w.tree.z, .12, .9, '#d8b888', .5);
+        if (chopping && this.fx && Math.random() < dt * 1.6) {
+          if (j.kind === 'ore') { const a = Math.atan2(w.x - w.tree.x, w.z - w.tree.z), r = j.rock.r * .8; this.fx.puff(w.tree.x + Math.sin(a) * r, T.H(w.tree.x, w.tree.z) + .45, w.tree.z + Math.cos(a) * r, .14, .8, Math.random() < .5 ? '#a49c90' : ORES[j.rock.mineral].color, .55); }
+          else this.fx.puff(w.tree.x, T.H(w.tree.x, w.tree.z) + .25, w.tree.z, .12, .9, '#d8b888', .5);
+        }
       }
       if (j.phase === 'home' && (j.workers.every(w => Math.hypot(w.x - w.home[0], w.z - w.home[1]) < .1) || j.t > 20)) this.endJob(j);
     }
