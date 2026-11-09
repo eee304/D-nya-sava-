@@ -161,6 +161,13 @@ Claude Code hafızası proje yoluna göre bir klasörde durur:
 5. **Osmanlı (1810):** Akdeniz bölgesi üçe ayrıldı → Güney Anadolu (eski Akdeniz'in sırası, kayıtlar bozulmaz), Kıbrıs, Şam (`splitOttomanMed`). İklim: Arap yarımadası ve Suriye çölü coğrafyaya göre çöl/bozkır (Osmanlı'ya TR kodu verildiği için önce ılıman çıkıyordu), Kıbrıs ve Güney Anadolu yeşil.
 6. Referans (free3d "cartoon low poly landscape"): ormanlara devrik kütükler ve mantar kümeleri eklendi.
 
+**9 Kasım:**
+1. **Bölgeler gerçek coğrafyada:** bölgeye girince dünya haritasındaki kara şekilleri ve ilin kendi sınırı bölge koordinatlarına çevrilip iki işaretli uzaklık alanına işlenir (`region/geomask.js`, `main.js` → `regionGeo`). Kıyı artık gerçek kıyı (Kıbrıs gerçek ada, Karadeniz kuzeyde, Kızıldeniz Mekke'nin batısında…). İl, gerçek şeklinde yükseltilmiş bir parça; sınır dışındaki komşu topraklar alçak, gri-soluk ve boş (ağaç, ev, yol yok); il sınırı kara-kara kesimlerinde mürekkep + sahip rengiyle çizili. Yalnız il içine inşa edilir (önizleme 'outside').
+2. Kamera artık güneyden bakıyor: **kuzey yukarıda**, güney kıyısı aşağıda (sağ tıkla döndürülebilir).
+3. Ölçek: il, kasabanın çevresine bütünüyle sığacak şekilde (küçük kıymıklar sayılmaz); kasaba ilin içinde, karada, ortaya yakın ve kenarlardan uzak bir noktada (`interiorPoint`).
+4. İklim: Afrika kuralı Anadolu/Levant/Kıbrıs/Girit/Yunanistan'ı artık kapsamıyor (Güney Anadolu bozkır çıkıyordu).
+5. Not: arazi değiştiği için eski kayıtlardaki kesilmiş orman ve kazılmış kaya konumları yeni haritada geçersiz (ormanlar ve kayalar yeniden dağıldı).
+
 ---
 
 ## 7. Test durumu (son çalıştırma)

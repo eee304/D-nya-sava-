@@ -964,6 +964,9 @@ function splitOttomanMed(reg){
   let north=[], south=[];
   try{ north=polygonClipping.intersection(rest, [ANATOLIA_SOUTH]); south=polygonClipping.difference(rest, [ANATOLIA_SOUTH]); }catch(e){ return reg; }
   // Güney Anadolu keeps Akdeniz's place in the list (province ids are saved in games), the new ones go to the end
+  // the cut along the border line leaves thin slivers: keep only real pieces of land
+  const parea=poly=>{ const q=poly[0]; let a=0; for(let j=0,k2=q.length-1;j<q.length;k2=j++) a+=(q[k2][0]+q[j][0])*(q[k2][1]-q[j][1]); return Math.abs(a/2); };
+  north=north.filter(q=>parea(q)>.03); south=south.filter(q=>parea(q)>.03);
   const out=reg.slice();
   out[i]={ n:'Güney Anadolu', p:north.length? north : rest };
   if(cyp.length) out.push({ n:'Kıbrıs', p:cyp });
@@ -3638,19 +3641,50 @@ function provAtScreen(nx, ny){
   return h ? h.object.userData.prov : null;
 }
 
+// a good spot for the town: inside the province, on land, well away from its edges and not far from its middle
+// the province's real land: tiny islets and slivers do not count when framing the view
+function mainRings(p){
+  const ar=p.ringsXZ.map(r=>{ let a=1e9,b=-1e9,c=1e9,d=-1e9; for(const [x,z] of r){ a=Math.min(a,x); b=Math.max(b,x); c=Math.min(c,z); d=Math.max(d,z); } return (b-a)*(d-c); });
+  const big=Math.max(...ar, 1e-9); return p.ringsXZ.filter((r,i)=>ar[i]>big*.03);
+}
+function interiorPoint(p){
+  const pts=[]; for(const r of mainRings(p)){ const st=Math.max(1, Math.floor(r.length/300)); for(let i=0;i<r.length;i+=st) pts.push(r[i]); }
+  const clear=(x,z)=>{ let d=1e9; for(const [a,b] of pts){ const q=(a-x)*(a-x)+(b-z)*(b-z); if(q<d) d=q; } return Math.sqrt(d); };
+  const ok=(x,z)=>provAt(x,z)===p && isLandPtExact(x,z);
+  let x0=1e9, x1=-1e9, z0=1e9, z1=-1e9; for(const [x,z] of pts){ x0=Math.min(x0,x); x1=Math.max(x1,x); z0=Math.min(z0,z); z1=Math.max(z1,z); }
+  let best=null, bs=-1e9;
+  for(let i=0;i<22;i++) for(let j=0;j<22;j++){ const x=x0+(i+.5)/22*(x1-x0), z=z0+(j+.5)/22*(z1-z0); if(!ok(x,z)) continue;
+    const c=clear(x,z), sc=c-.35*Math.hypot(x-(x0+x1)/2, z-(z0+z1)/2); if(sc>bs){ bs=sc; best=[x,z,c]; } }   // roomy, and near the middle of the province so all of it fits the view
+  if(!best) return p.center.slice();
+  const c0=ok(p.center[0], p.center[1]) ? clear(p.center[0], p.center[1]) : 0;
+  return c0>best[2]*.55 ? p.center.slice() : [best[0], best[1]];
+}
+// the real land outlines around a region and the province's own outline, in region coordinates (for geomask.js)
+const _polyCache=new Map();
+function regionGeo(p, center, k){
+  const R=(REGION_HALF+230)/k, land=[];
+  for(const f of LANDFEATS||[]){
+    let polys=_polyCache.get(f); if(!polys){ polys=countryPolys(f).map(poly=>{ const r=poly[0]; let a=1e9,b=-1e9,c=1e9,d=-1e9; for(const [x,y] of r){ a=Math.min(a,x); b=Math.max(b,x); c=Math.min(c,-y); d=Math.max(d,-y); } return { r, bb:[a,b,c,d] }; }); _polyCache.set(f, polys); }
+    for(const { r, bb } of polys){ if(bb[1]<center[0]-R || bb[0]>center[0]+R || bb[3]<center[1]-R || bb[2]>center[1]+R) continue;
+      land.push(r.map(([x,y])=>[(x-center[0])*k, (-y-center[1])*k])); }
+  }
+  return { land, prov: p.ringsXZ.map(r=>r.map(([x,z])=>[(x-center[0])*k, (z-center[1])*k])) };
+}
 // everything the region generator needs to know about a country, as plain data
 // everything the region generator needs to know about one province, as plain data
 function regionInfoFor(idOrName){
   const p = resolveProv(idOrName); if(!p) return null;
   const country=p.country, cap0=capitalXZ(country);
   // the capital province is centred on the capital city itself
-  const center = (p.capital && cap0 && provAt(cap0[0], cap0[1])===p) ? cap0.slice() : p.center.slice();
+  const center = (p.capital && cap0 && provAt(cap0[0], cap0[1])===p) ? cap0.slice() : interiorPoint(p);
   const ll = projection.invert([center[0]+W/2, center[1]+H/2]) || [0, 30];
   const rnd = makeRng(hashStr('region|'+p.id));
   // province extent in map units -> region scale k
   let x0=1e9, x1=-1e9, z0=1e9, z1=-1e9;
   for(const r of p.ringsXZ) for(const [x,z] of r){ if(x<x0)x0=x; if(x>x1)x1=x; if(z<z0)z0=z; if(z>z1)z1=z; }
-  const span=Math.max(x1-x0, z1-z0, 1), k=Math.min(24, Math.max(.6, (REGION_HALF*2-50)/span));   // the province fills most of the square
+  // the whole province fits round the town (which sits at the centre of the view, not necessarily of the province)
+  let reach=.5; for(const r of mainRings(p)) for(const [x,z] of r) reach=Math.max(reach, Math.abs(x-center[0]), Math.abs(z-center[1]));
+  const span=Math.max(x1-x0, z1-z0, 1), k=Math.min(24, Math.max(.6, (REGION_HALF-14)/reach));
   // sea only where the region itself touches it: walk the region's own border and look just outside it
   let coast=null;
   { let sx=0, sz=0, n=0, dmin=1e9;
@@ -3682,6 +3716,7 @@ function regionInfoFor(idOrName){
     isPlayer, ownerColor, ownerName, ownerCulture: isPlayer ? cultureOfCountry(S.homeName) : null, buildings, devLevel:devLvl, devName: isPlayer ? SETTLE_NAMES[settle] : DEV_LEVELS[devLvl][1], profile:(profileOf(country)||{}).mult,
     landmark: isPlayer ? settle>=2 : (p.capital || devLvl>=3), walls: isPlayer ? settle>=2 : (p.capital || devLvl>=3),
     // ours: no ready-made fields (every field is one we built), 3–5 cottages that grow with each upgrade, felled woods stay felled
+    geo: regionGeo(p, center, k),
     shipsAt: isPlayer ? ships.map(sh=>[(sh.position.x-center[0])*k, (sh.position.z-center[1])*k]).filter(([x,z])=>Math.abs(x)<REGION_HALF+40 && Math.abs(z)<REGION_HALF+40) : [],
     ores: isPlayer ? oreKindsFor(p) : [], dug: isPlayer ? (S.dug[p.id]||[]) : [],
     noFields: isPlayer, houses: isPlayer ? [3 + hashStr(p.id) % 3, 11, 22, 22][settle] : null, settle, cleared: isPlayer ? (S.cleared[p.id]||[]) : [],
@@ -3825,6 +3860,7 @@ function regionWhy(type, g){
   if(g.why==='field') return '🌾 Bir tarlanın üstüne gelemez — biraz kaydır.';
   if(g.why==='building') return '🏠 Başka bir yapıyla birleşiyor — boş bir yer seç.';
   if(g.why==='coast') return '⚓ Liman ve iskele kıyıya, derin suyun hemen yanına kurulur.';
+  if(g.why==='outside') return '🗺️ Bölgenin sınırı dışında — yalnız kendi bölgenin topraklarına inşa edebilirsin.';
   if(g.why==='ground') return '⚠️ Zemin uygun değil — düz, kuru ve yoldan uzak bir yer seç.';
   const [wx, wz]=regionToWorld(g.x, g.z), p=provAt(wx, wz);
   if(!p || p.id!==regionName || !ownsProv(p.id)) return '⚠️ Yalnızca bu bölgenin sınırları içine inşa edebilirsin.';
@@ -4159,6 +4195,7 @@ if (new URLSearchParams(location.search).has('test')) {
     get post(){ return post; },
     stats(){ const r=renderer.info.render; let meshes=0, inst=0, lines=0; scene.traverse(o=>{ if(o.visible===false) return; if(o.isInstancedMesh) inst++; else if(o.isMesh) meshes++; else if(o.isLine||o.isLineSegments) lines++; }); return { calls:r.calls, tris:r.triangles, meshes, inst, lines, geos:renderer.info.memory.geometries, tex:renderer.info.memory.textures }; },
     sceneRoot(){ return scene; },
+    geoDump(id){ const p=PI.byId[id], i=regionInfoFor(id); return { meta:{ label:p.label, center:i.center, k:i.k, rings:p.ringsXZ.map(r=>r.length), lat:i.lat, lon:i.lon, pcenter:p.center }, geo:i.geo }; },
     legalAt(type,x,z){ return regionLegal(type,x,z); },
     planarCover(lon,lat){ const q=sceneXZ(lon,lat), out=[]; if(!q) return 'noq';
       const inR=(r,x,y)=>{ let c=false; for(let i=0,j=r.length-1;i<r.length;j=i++){ const [xi,yi]=r[i],[xj,yj]=r[j]; if(((yi>y)!==(yj>y)) && x<(xj-xi)*(y-yi)/(yj-yi)+xi) c=!c; } return c; };

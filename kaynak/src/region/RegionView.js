@@ -20,7 +20,7 @@ import { setWindowGlow } from './textures.js';
 import { RIGS } from './prefabs.js';
 
 const VIEW_H = 40;            // world units visible vertically at zoom 1
-const CAM_OFFSET = new THREE.Vector3(80, 76, 80);
+const CAM_OFFSET = new THREE.Vector3(0, 76, 113);   // from the south, like reading a map: north is up, a southern coast is at the bottom
 export const REGION_MIN_ZOOM = .42;   // far enough out to overlook the whole province
 const GHOST_OK = '#4aa8ff', GHOST_BAD = '#ff4f45';   // placement preview: blue = fits, red = cannot be built
 const FIELD_COLORS = ['#c3a24a', '#7f9a3c', '#b8933f', '#9aa646', '#c9ac57', '#8c8a3a', '#a9a248'];   // same as the painted ground (terrain.js)
@@ -92,7 +92,7 @@ export class RegionView {
     const obstacles = [];
     const occupied = (x, z, r) => obstacles.some(o => Math.hypot(o[0] - x, o[1] - z) < o[2] + r);
     const freeSpot = (x, z, r) => T.H(x, z) > .4 && T.slope(x, z) < .8 && T.riverDist(x, z) > r + 2 && T.roadDist(x, z) > r + .9
-      && !T.inField(x, z, .5) && !occupied(x, z, r) && Math.abs(x) < HALF - 5 && Math.abs(z) < HALF - 5;
+      && !T.inField(x, z, .5) && !occupied(x, z, r) && Math.abs(x) < HALF - 5 && Math.abs(z) < HALF - 5 && T.inProv(x, z, r + .5);
     const findSpot = (x, z, r) => {
       for (let rad = 0; rad < 26; rad += 1.5) for (let k = 0; k < (rad ? 10 : 1); k++) {
         const a = k / 10 * Math.PI * 2, px = x + Math.cos(a) * rad, pz = z + Math.sin(a) * rad;
@@ -144,7 +144,7 @@ export class RegionView {
       const orng = makeRng(hashStr(info.name + '|ore')), dug = new Set(info.dug || []);
       for (let i = 0, tries = 0; i < info.ores.length && tries < 600; tries++) {
         const a = orng() * Math.PI * 2, d = 26 + orng() * 50, x = Math.cos(a) * d, z = Math.sin(a) * d;
-        if (T.H(x, z) < .6 || T.slope(x, z) > .7 || T.riverDist(x, z) < 4 || T.roadDist(x, z) < 3 || Math.abs(x) > HALF - 8 || Math.abs(z) > HALF - 8) continue;
+        if (T.H(x, z) < .6 || T.slope(x, z) > .7 || T.riverDist(x, z) < 4 || T.roadDist(x, z) < 3 || Math.abs(x) > HALF - 8 || Math.abs(z) > HALF - 8 || !T.inProv(x, z, 4)) continue;
         if (this.rocks.some(r => Math.hypot(r.x - x, r.z - z) < 14)) continue;
         const rock = this.makeRock(i, ORES[info.ores[i]] ? info.ores[i] : 'copper', x, z, orng, dug.has(i));
         obstacles.push([x, z, rock.r + .6]); i++;
@@ -171,10 +171,10 @@ export class RegionView {
       const segs = Math.round(WR * 2 * Math.PI / 1.7);
       for (let i = 0; i < segs; i++) {
         const am = (i + .5) / segs * Math.PI * 2; if (gates.some(g => angDiff(am, g) < .13)) continue;
-        const x = Math.cos(am) * WR, z = Math.sin(am) * WR, y = T.H(x, z); if (y < .3 || T.riverDist(x, z) < 2 || occupied(x, z, .6) || T.inField(x, z, .4)) continue;   // never across a field
+        const x = Math.cos(am) * WR, z = Math.sin(am) * WR, y = T.H(x, z); if (y < .3 || T.riverDist(x, z) < 2 || occupied(x, z, .6) || T.inField(x, z, .4) || !T.inProv(x, z, .3)) continue;   // never across a field
         wallSegment(K, x, y, z, am, 2 * WR * Math.sin(Math.PI / segs) + .08, stone, culture);
       }
-      for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2, x = Math.cos(a) * WR, z = Math.sin(a) * WR, y = T.H(x, z); if (y > .3 && !gates.some(g => angDiff(a, g) < .2) && T.riverDist(x, z) > 2 && !T.inField(x, z, 1) && !occupied(x, z, .8)) tower(K, x, y, z, stone, roof, culture); }
+      for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2, x = Math.cos(a) * WR, z = Math.sin(a) * WR, y = T.H(x, z); if (y > .3 && !gates.some(g => angDiff(a, g) < .2) && T.riverDist(x, z) > 2 && !T.inField(x, z, 1) && !occupied(x, z, .8) && T.inProv(x, z, .3)) tower(K, x, y, z, stone, roof, culture); }
       for (const g of gates) for (const sg of [-1, 1]) {
         const a = g + sg * .16, x = Math.cos(a) * WR, z = Math.sin(a) * WR, y = T.H(x, z); if (y < .3) continue;
         gateTower(K, x, y, z, stone, roof, culture);
@@ -218,15 +218,15 @@ export class RegionView {
     // (own random stream, and the town's clearing applied afterwards: the town growing never moves a tree)
     const veg = addVegetation(scene, T, B, makeRng(hashStr(info.name + '|forest')), (x, z) => {
       const h = T.Hraw(x, z); if (h < .45 || h > B.snowAt + 1.5) return false;
-      return T.riverDist(x, z) > 3.2 && T.roadDist(x, z) > 1.6 && T.slope(x, z) < 1.2;
+      return T.riverDist(x, z) > 3.2 && T.roadDist(x, z) > 1.6 && T.slope(x, z) < 1.2 && T.inProv(x, z, .8);   // only on our own soil
     }, (x, z) => cut.has(treeKey(x, z)) ? 'cut' : (Math.hypot(x, z) < T.townR + 6.5 || T.inField(x, z, .6) || occupied(x, z, .4)));
-    addOuterTrees(scene, T, B, rng);
+    if (!T.geo) addOuterTrees(scene, T, B, rng);   // (with real geography everything past the square is a neighbour's shelf)
     this.treeCount = veg.count; this.veg = veg.items; this.terrain = terrain; this.groundTex = ttex;
     this.indexTrees(); this.makeStumps(veg.stumps); this.jobs = [];
     this.addIdentity(K, rng, freeSpot);
     this.cover = [];
     this.tufts = addGroundCover(scene, T, B, info, rng, (x, z) => Math.hypot(x, z) > 4.2 && T.roadDist(x, z) > 1.15 && T.riverDist(x, z) > 1.6
-      && !T.inField(x, z, .15) && !occupied(x, z, .25) && Math.abs(x) < HALF - 1 && Math.abs(z) < HALF - 1, this.cover);
+      && !T.inField(x, z, .15) && !occupied(x, z, .25) && Math.abs(x) < HALF - 1 && Math.abs(z) < HALF - 1 && T.inProv(x, z, .3), this.cover);
     // a light haze in the distance gives the region depth
     this.haze = new THREE.Fog('#b9cbd8', 190, 430); scene.fog = this.haze;
     K.flush(scene);
@@ -713,13 +713,14 @@ export class RegionView {
     if (Math.abs(x) > HALF - 5 || Math.abs(z) > HALF - 5) return 'ground';
     if (type === 'port' || type === 'shipyard' || type === 'fishery') {   // must stand on the shore with deep water close by
       const ok = T.H(x, z) > .2 && T.H(x, z) < 1.4 && [...Array(16)].some((_, i) => { const a = i / 16 * Math.PI * 2; return T.H(x + Math.cos(a) * 6, z + Math.sin(a) * 6) < -.5; });
-      return !ok ? 'coast' : occupied(x, z, 1.6) ? 'building' : this.hasTree(x, z, 1.8) ? 'forest' : null;
+      return !T.inProv(x, z, .3) ? 'outside' : !ok ? 'coast' : occupied(x, z, 1.6) ? 'building' : this.hasTree(x, z, 1.8) ? 'forest' : null;
     }
     // sample the whole footprint: a 6×5 rectangle for fields, a disc for buildings
     const pts = [];
     if (type === 'field') { const c = Math.cos(rot), s = Math.sin(rot); for (let u = -3; u <= 3.01; u += 1) for (let v = -2.5; v <= 2.51; v += 1.25) pts.push([x + u * c + v * s, z - u * s + v * c]); }
     else { pts.push([x, z]); for (let k = 0; k < 2; k++) for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2, rr = R * (k ? .85 : .45); pts.push([x + Math.cos(a) * rr, z + Math.sin(a) * rr]); } }
     for (const [px, pz] of pts) {
+      if (!T.inProv(px, pz, .2)) return 'outside';
       if (T.H(px, pz) < .4 || T.slope(px, pz) > .8 || T.riverDist(px, pz) < 1.2 || T.roadDist(px, pz) < 1.2) return 'ground';
       if (T.inField(px, pz, .2)) return 'field';
       if (occupied(px, pz, .3)) return 'building';

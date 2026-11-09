@@ -47,6 +47,7 @@ export const BIOMES = {
 // Africa and Arabia by position (1810 states have no ISO code): Sahara, Sahel/savanna, Congo forest, Kalahari
 function africaBiome(lat, lon) {
   if (lon < -20 || lon > 60 || lat < -36 || lat > 37) return null;
+  if ((lon >= 26 && lat > 32) || (lat > 35.5 && lon > 12)) return null;   // Anatolia, the Levant, Cyprus, Crete, Greece are not Africa
   if (lat > 31 && lon < 36) return 'steppe';                                   // Maghreb and Mediterranean coast
   if (lat >= 15 || (lon > 34 && lat > 12)) return 'desert';                     // Sahara and Arabia
   if (lat < -17 && lon < 26) return 'desert';                                   // Namib and Kalahari

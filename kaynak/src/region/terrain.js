@@ -1,6 +1,7 @@
 // Region terrain: layout (coast, mountains, river, roads, fields), heightfield and painted ground texture.
 import * as THREE from 'three';
 import { clamp, lerp, sstep, hash, vnoise, fbm, segD, polyD, polyLen, along } from './noise.js';
+import { buildMasks } from './geomask.js';
 
 // the playable square: big enough to build a whole province (was 110 units)
 export const SIZE = 200, HALF = SIZE / 2, N = 401, STEP = SIZE / (N - 1);
@@ -18,7 +19,13 @@ export function buildTerrain(info, B, rng) {
   const TOWN = [0, 0];
   const townR = 7 + (info.devLevel ?? 2) * 2.6;   // the settlement grows with the province's development
 
-  const coastAt = (x, z) => coast ? (x * coast.d[0] + z * coast.d[1]) - (coast.D + (fbm(x * .05 + 40, z * .05 + 7, 3) - .5) * 16) : -1e9;
+  // real geography (info.geo, from the world map): the coast is the real coastline and the province keeps its real outline;
+  // without it (older callers) a wavy straight coast as before
+  const GM = info.geo ? buildMasks(info.geo, HALF + 215) : null;
+  const coastAt = GM ? (x, z) => GM.landAt(x, z) + (fbm(x * .09 + 40, z * .09 + 7, 3) - .5) * 4
+    : (x, z) => coast ? (x * coast.d[0] + z * coast.d[1]) - (coast.D + (fbm(x * .05 + 40, z * .05 + 7, 3) - .5) * 16) : -1e9;
+  // distance to the province border (negative inside); everything outside is a neighbour's land
+  const provDist = GM ? (x, z) => GM.provAt(x, z) : (x, z) => Math.max(Math.abs(x), Math.abs(z)) - HALF;
 
   // ---- river: meanders past the town, flows toward the sea when there is one
   let RIVER = null;
@@ -41,7 +48,7 @@ export function buildTerrain(info, B, rng) {
     for (let k = 0; k < Math.ceil(HALF / 8) + 3; k++) {
       if (k >= 2) ang += (rng() - .5) * .35;   // straight for the first 16 units
       x += Math.cos(ang) * 8; z += Math.sin(ang) * 8;
-      if (Math.abs(x) > HALF + 3 || Math.abs(z) > HALF + 3 || coastAt(x, z) > -3) break;
+      if (Math.abs(x) > HALF + 3 || Math.abs(z) > HALF + 3 || coastAt(x, z) > -3 || (GM && provDist(x, z) > 1)) break;   // roads end at the coast and the border
       pts.push([x, z]);
     }
     if (pts.length > 2) ROADS.push(pts);
@@ -54,19 +61,21 @@ export function buildTerrain(info, B, rng) {
     let h = 1.0 + (fbm(x * .035 + so, z * .035 + 3) - .5) * 2.0 + Math.pow(fbm(x * .06 + 77 + so, z * .06 + 11, 3), 3) * 4 * hilly;
     if (B.dunes) h += (Math.sin(x * .32 + z * .18 + fbm(x * .05, z * .05, 2) * 7) * .5 + .5) * 1.3 * fbm(x * .02 + 9, z * .02, 2);
     if (mtn) { const v = x * mtn.d[0] + z * mtn.d[1], m = sstep(mtn.D - 12, mtn.D + 22, v); h += m * m * (4 + fbm(x * .09 + 5, z * .09 + 9) * 14); }
-    h -= Math.max(0, coastAt(x, z) + 10) * .32;
+    h -= Math.max(0, coastAt(x, z) + (GM ? 4 : 10)) * .32;
     const td = Math.hypot(x - TOWN[0], z - TOWN[1]);
     h = lerp(h, 1.1, sstep(townR + 7, townR - 1, td));
+    // outside the province the land sinks to a low, flat shelf: the province stands up in its real shape, like on the world map
+    if (GM && h > .3) { const pd = provDist(x, z); if (pd > -.6) h = lerp(h, Math.max(.3, .34 + (h - 1) * .1), sstep(-.6, 1.4, pd)); }
     if (RIVER) { const rd = polyD(RIVER, x, z), w = 1.5; h = Math.min(h, lerp(-1.1, h, sstep(w, w + 3.5, rd))); }
     return h;
   }
 
   // ---- grids (heights + per-cell noise, sampled bilinearly afterwards)
-  const HG = new Float32Array(N * N), FG = new Float32Array(N * N), GG = new Float32Array(N * N), RG = new Float32Array(N * N), CG = new Float32Array(N * N);
+  const HG = new Float32Array(N * N), FG = new Float32Array(N * N), GG = new Float32Array(N * N), RG = new Float32Array(N * N), CG = new Float32Array(N * N), PG = new Float32Array(N * N);
   for (let iz = 0; iz < N; iz++) for (let ix = 0; ix < N; ix++) {
     const x = -HALF + ix * STEP, z = -HALF + iz * STEP, i = iz * N + ix;
     HG[i] = Hraw(x, z); FG[i] = fbm(x * .07 + 100 + so, z * .07 + 50, 3); GG[i] = fbm(x * .12 + 30, z * .12 + so, 3);
-    RG[i] = RIVER ? polyD(RIVER, x, z) : 1e3; CG[i] = coastAt(x, z);
+    RG[i] = RIVER ? polyD(RIVER, x, z) : 1e3; CG[i] = coastAt(x, z); PG[i] = provDist(x, z);
   }
   function samp(G, x, z) {
     const fx = clamp((x + HALF) / STEP, 0, N - 1.001), fz = clamp((z + HALF) / STEP, 0, N - 1.001);
@@ -92,7 +101,7 @@ export function buildTerrain(info, B, rng) {
   for (let i = 0; i < 900 && FIELDS.length < fieldCount; i++) {
     const a = rng() * Math.PI * 2, r = townR + 6 + rng() * 30, x = Math.cos(a) * r, z = Math.sin(a) * r;
     const w = 5 + rng() * 3, h = 4 + rng() * 3;
-    if (Math.abs(x) > HALF - 7 || Math.abs(z) > HALF - 7 || H(x, z) < .5 || slope(x, z) > .5 || riverDist(x, z) < 4 || roadDist(x, z) < 4.5) continue;
+    if (Math.abs(x) > HALF - 7 || Math.abs(z) > HALF - 7 || H(x, z) < .5 || slope(x, z) > .5 || riverDist(x, z) < 4 || roadDist(x, z) < 4.5 || provDist(x, z) > -5) continue;
     if (info.biome === 'desert' && RIVER == null && r > townR + 20) continue;
     if (FIELDS.some(f => Math.hypot(f[0] - x, f[1] - z) < 7.5)) continue;
     FIELDS.push([x, z, w, h, a + Math.PI / 2]);
@@ -105,7 +114,8 @@ export function buildTerrain(info, B, rng) {
 
     // the same height and forest functions without the grid, for the countryside around the playable square
   const forestRaw = (x, z) => fbm(x * .07 + 100 + so, z * .07 + 50, 3);
-  return { TOWN, townR, crossAng: a0, coast, mtn, RIVER, ROADS, BRIDGES, FIELDS, HG, FG, GG, RG, CG, H, slope, riverDist, forestAt, roadDist, inField, coastAt, samp, so, Hraw, forestRaw };
+  const inProv = (x, z, m = 0) => samp(PG, x, z) < -m;   // inside this province, at least m from its border
+  return { TOWN, townR, crossAng: a0, coast, mtn, RIVER, ROADS, BRIDGES, FIELDS, HG, FG, GG, RG, CG, PG, provDist, inProv, geo: info.geo || null, H, slope, riverDist, forestAt, roadDist, inField, coastAt, samp, so, Hraw, forestRaw };
 }
 
 // Paint the ground texture: grass variety, forest floor, sand, rock, snow, fields, roads, plaza.
@@ -115,7 +125,9 @@ export function paintGround(T, B, info, patches, S = 1536) {
   const G1 = hex(B.grass[0]), G2 = hex(B.grass[1]), G3 = hex(B.grass[2]), DRY = hex(B.dry), FF = hex(B.floor), SAND = hex(B.sand),
     WET = mixc(SAND, [90, 80, 60], .35), DEEP = hex(B.water).map(v => v * .55), FOAM = [232, 239, 230],
     ROCK1 = hex(B.rock[0]), ROCK2 = hex(B.rock[1]), SNOW = [238, 242, 244];
-  const { H, samp, FG, GG, RG, CG } = T;
+  const { H, samp, FG, GG, RG, CG, PG } = T;
+  // a neighbour's land: greyer and darker, like the parts of a painted map that are not in play
+  const outside = (c, pd) => { if (pd < -1.2) return c; const t = sstep(-.6, 1.4, pd), g = (c[0] + c[1] + c[2]) / 3; return mixc(c, [g * .9, g * .92, g * .88], .55 * t).map(v => v * (1 - .2 * t)); };
   for (let py = 0; py < S; py++) {
     const z = -HALF + (py + .5) / S * SIZE;
     for (let px = 0; px < S; px++) {
@@ -128,13 +140,15 @@ export function paintGround(T, B, info, patches, S = 1536) {
       } else {
         const f = samp(FG, x, z), g = samp(GG, x, z), rd = samp(RG, x, z), cu = samp(CG, x, z);
         c = mixc(G1, G2, g); c = mixc(c, G3, sstep(.5, .8, dn) * .35); c = mixc(c, DRY, sstep(.42, .25, g) * .55);
-        c = mixc(c, FF, sstep(B.forest - .01, B.forest + .07, f) * .75);
+        const pdo = PG ? samp(PG, x, z) : -9;   // no forest floor on a neighbour's (treeless) shelf
+        c = mixc(c, FF, sstep(B.forest - .01, B.forest + .07, f) * .75 * (1 - sstep(-1.5, .5, pdo)));
         if (B.dunes) c = mixc(c, mixc(SAND, DRY, vnoise(x * .4, z * .4)), .35 * (Math.sin(x * .32 + z * .18 + g * 7) * .5 + .5));
         c = mixc(c, SAND, Math.max(sstep(-14, -6, cu), sstep(5, 2.4, rd)) * sstep(1.05, .3, h));
         const sl = Math.hypot(H(x + .4, z) - H(x - .4, z), H(x, z + .4) - H(x, z - .4)) / .8 * .5;
         c = mixc(c, mixc(ROCK1, ROCK2, dn), Math.max(sstep(.5, .95, sl), sstep(5, 8.5, h)));
         if (B.snowy) c = mixc(c, SNOW, B.snowy * sstep(.45, .7, vnoise(x * .12 + 3, z * .12) * .7 + dn * .3));
         c = mixc(c, SNOW, sstep(B.snowAt, B.snowAt + 2.5, h));
+        if (PG) c = outside(c, samp(PG, x, z));
       }
       const k = (.9 + sp * .16) * (.94 + .12 * vnoise(x * 6, z * 6)), o = (py * S + px) * 4;
       D[o] = c[0] * k; D[o + 1] = c[1] * k; D[o + 2] = c[2] * k; D[o + 3] = 255;
@@ -220,6 +234,20 @@ export function paintGround(T, B, info, patches, S = 1536) {
   } else {
     paintSquare();   // the dirt roads end at the cobbled square: the crossroads sits inside it
   }
+  // the province border, inked like on the world map — only where land meets land (the coast draws itself)
+  if (T.geo && T.geo.prov) {
+    const L = (x, z) => T.coastAt(x, z) < -1;
+    ctx.lineCap = ctx.lineJoin = 'round';
+    for (const [w, col] of [[.55, 'rgba(30,24,16,.55)'], [.22, info.ownerColor || '#e8c33a']]) {
+      ctx.lineWidth = w; ctx.strokeStyle = col; ctx.beginPath();
+      for (const r of T.geo.prov) for (let i2 = 0; i2 < r.length; i2++) {
+        const [ax, az] = r[i2], [bx, bz] = r[(i2 + 1) % r.length], mx = (ax + bx) / 2, mz = (az + bz) / 2, dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz) || 1;
+        if (Math.abs(mx) > HALF || Math.abs(mz) > HALF || !L(mx + dz / l * 2, mz - dx / l * 2) || !L(mx - dz / l * 2, mz + dx / l * 2)) continue;
+        ctx.moveTo(ax, az); ctx.lineTo(bx, bz);
+      }
+      ctx.stroke();
+    }
+  }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   return cv;
 }
@@ -241,13 +269,14 @@ export function outerGround(T, B, R = 260, step = 2.5) {
     else {
       const g = fbm(x * .12 + 30, z * .12 + T.so, 3), f = T.forestRaw(x, z), dn = vnoise(x * .3, z * .3);
       c = mixc(G1, G2, g); c = mixc(c, DRY, sstep(.42, .25, g) * .55);
-      c = mixc(c, FF, sstep(B.forest - .01, B.forest + .07, f) * .8);
+      c = mixc(c, FF, sstep(B.forest - .01, B.forest + .07, f) * .8 * (T.geo ? 0 : 1));
       c = mixc(c, SAND, Math.max(sstep(-14, -6, T.coastAt(x, z)), T.RIVER ? sstep(5, 2.4, polyD(T.RIVER, x, z)) : 0) * sstep(1.05, .3, h));
       const sl = Math.hypot(T.Hraw(x + 1, z) - T.Hraw(x - 1, z), T.Hraw(x, z + 1) - T.Hraw(x, z - 1)) / 2 * .5;
       c = mixc(c, ROCK, Math.max(sstep(.5, .95, sl), sstep(5, 8.5, h)));
       if (B.snowy) c = mixc(c, SNOW, B.snowy * sstep(.45, .7, dn));
       c = mixc(c, SNOW, sstep(B.snowAt, B.snowAt + 2.5, h));
       c = c.map(v => v * (.92 + dn * .14));
+      if (T.geo) { const pd = T.provDist(x, z); if (pd > -1.2) { const t = sstep(-.6, 1.4, pd), g = (c[0] + c[1] + c[2]) / 3; c = mixc(c, [g * .9, g * .92, g * .88], .55 * t).map(v => v * (1 - .2 * t)); } }
     }
     // vertex colours are linear: undo the sRGB of the painted palette so both grounds match
     col.set(c.map(v => Math.pow(v / 255, 2.2)), i * 3);
