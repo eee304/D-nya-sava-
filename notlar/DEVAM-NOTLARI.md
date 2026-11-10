@@ -168,9 +168,25 @@ Claude Code hafızası proje yoluna göre bir klasörde durur:
 4. İklim: Afrika kuralı Anadolu/Levant/Kıbrıs/Girit/Yunanistan'ı artık kapsamıyor (Güney Anadolu bozkır çıkıyordu).
 5. Not: arazi değiştiği için eski kayıtlardaki kesilmiş orman ve kazılmış kaya konumları yeni haritada geçersiz (ormanlar ve kayalar yeniden dağıldı).
 
+**10 Kasım (on iki madde birden):**
+1. **Karadeniz hatası (1810):** ordu kara ızgarası (`LAND_GRID`) 6 birimlik hücrenin yalnız merkezine bakıyordu; Kırım'ın ve Sinop'un hücreleri denize taşıyor, Karadeniz'in ortası "kara" sayılıyordu. Hücre 3 birime indi ve hücre ancak yarısından çoğu kara ise kara sayılıyor (`buildLandGrid`). Kesin testle uyuşmazlık %4 (yalnız kıyı hücreleri).
+2. **Gerçek nehirler:** Natural Earth 1:10m nehir çizgileri sadeleştirilip `public/data/rivers.json` (1971 parça, 1,2 MB) oldu. Dünya haritasında boyalı (büyükler kalın), bölge görünümünde gerçek yerlerinde: yumuşatılıp hafif kıvrım verilir, genişlik nehrin önemine göre (`RIVER_HALFW`); uzaktan görülen büyük illerde yalnız büyük nehirler, küçük illerde dereler de çıkar. Yol nehri geçtiği her yerde köprü (genişliğe göre uzun, çok ayaklı). İl sınırı nehir üstüne çizilmez.
+3. **Nehir kenarı:** nehre yakın (bölgede ~12 birim) kurulan tarla ×1,5 ekmek. **Su Değirmeni** (1500💰, 1810'da +30🪵) yalnız nehir kıyısına kurulur, çarkı suya bakar ve döner; bulunduğu bölgenin tarlaları +%25 (en çok 2 değirmen).
+4. **İnce/uzun iller:** kasaba noktası artık ilin tamamını en iyi sığdıran yerde; çapraz uzanan iller ±75°'ye kadar döndürülerek gösteriliyor (%30'dan fazla büyüyorsa). Sağ üstte **pusula** kuzeyi gösteriyor (kamera döndürülse de doğru). (`regionFrame`, `toRegion`, `fromRegion`)
+5. **Kuşatma:** surlu bölgeler (bizim şehir/büyük şehir, düşman başkentleri) önce kuşatılır: 25 / 40 gün (top/tank varsa ×0,6, kışın ×1,3). Kuşatmada içerideki garnizon erir; süre dolunca surda gedik açılır, hücum başlar. Botlar da bizim surlu bölgemizi 1–2 ay kuşatır, o arada asker yetiştirebilirsin; sonra surlar savunmaya +%20/seviye katar. Bölgeye girince kuşatma görünüyor: çadırlı ordugâh, toplar, şehre düşen gülleler, yangınlar.
+6. **İkmal:** sahadaki ordu her gün 1000 askere 1 ekmek yer (kışın ×1,5; 1810 kışında odun da yakar). En yakın kendi (ya da müttefik) bölgemizden **95 birimden** uzaksa (her üs +%15) veya ekmek biterse ikmal kesilir: ordu günde %1,2 erir, gücü ×0,75. Dünya haritasında ikmal hattı (kesik çizgi + giden araba; kesikse kırmızı), altta harekât çubuğu (aşama, asker, ikmal, kuşatma ilerlemesi).
+7. **Savaş izi:** zorla alınan bölgede 1–2 ev yanık harabe (is, düşmüş kirişler, köz, tüten duman, kararmış toprak). Onarılana kadar tarlalar ×0,5, öfke +3, yükseltme yok. Bölge başlığında **🔨 Yıkıntıları onar** (800+600/harabe 💰, 1810'da +25🪵/harabe).
+8. **Mevsimler:** ay = 30 sn. Kış (kuzeyde Ara–Şub, güneyde Haz–Ağu; tropiklerde yok): 42°'nin kuzeyinde tarla durur, 30–42° arası ×0,35; yazın ×1,15; ordular ve asker yürüyüşleri ×0,6 hızda; her kış ayı halk ısınmak için odun (1810: nüfus/120) ya da petrol (2014: nüfus/400) yakar, yoksa öfke +12. Dünya haritasında kışın kuzey karlı, sonbaharda altın ton; bölgede kar (yere ve ağaçlara), sonbahar yaprakları, bahar yeşili. Takvimin yanında mevsim simgesi.
+9. **Halk memnuniyeti:** öfke artık parçalardan oluşuyor (vergi, yapılar, karakter, doyurulmuş halk, açlık, soğuk, savaş yorgunluğu, yıkık bölgeler, olaylar, kısa maçta bölge dışı) — "Halk öfkesi" göstergesinin üstüne gelince döküm görünür. Halk her ay nüfus×0,1 ekmek yer; ekmek biterse aç (öfke +15, nüfus artmaz). Kaybedilen savaş yorgunluğu +8, kazanılan +2, kaybedilen bölge +10; barışta ayda −2.
+10. **Dönem olayları:** 2. aydan sonra 3–5 ayda bir sağda bir kart (40 sn içinde seçilmezse ilk seçenek). 1810: Napolyon Savaşları, veba, kuraklık, saray düğünü, bereketli yıl, donanmaya kereste. 2014: petrol krizi, yaptırımlar, ekonomik kriz, teknoloji atılımı, grip salgını, turizm patlaması (`EVENTS`).
+11. **Diplomasi (çok oyunculu):** alt çubukta "Diplomasi" (yalnız çok oyunculuda). Oyunculara para/ekmek/demir/balık/et/(odun | petrol, teknoloji) teklif et: verdiğin mal cevap gelene kadar emanette, reddedilirse geri gelir. İttifak teklif et/boz; müttefikler birbirine saldıramaz ve harekâtta birbirinin bölgelerinden ikmal alır. Mesajlar kurucu (host) üzerinden geçer; ittifak listesi dünya durumuyla herkese gider.
+12. **Kısa maç (40 dk):** dönem ekranında "Uzun oyun / Kısa maç" seçimi (çok oyunculuda lobide kurucunun kutusu). Rakipler oyuncunun çevresinde (yarıçap 100 birim) başlar, barış 3 ay. 15. dakikada güvenli bölge daralmaya başlar, 35. dakikada 30 birime iner (haritada sarı halka, dışı karartılı). Dışarıda kalan bölgelerde her ay askerin %25'i kaçar, öfke artar; botlar dışarıdaki ülkeleri kaybeder; dışarıya sefer yapılmaz. Süre dolunca ya da rakip kalmayınca en büyük imparatorluk (km²) kazanır.
+
 ---
 
 ## 7. Test durumu (son çalıştırma)
+
+10 Kasım (Playwright + swiftshader, `?test`): Karadeniz kara testi (kesin/ızgara uyuşmazlığı %4, Karadeniz ortası artık deniz) · Türkiye 2014 nehirleri ve köprüleri (Güneydoğu/İç Anadolu) · su değirmeni ve nehir kenarı tarla kurma · 1810 kış/sonbahar bölgeleri, yanık evler ve onarım · bot kuşatması ordugâhı · Yezd'e harekât: yürüyüş → 52 günlük kuşatma → ekmek bitince ikmal kesildi, ordu eridi → gedik → hücum · olay kartı · kısa maç (bölge halkası, daralma, süre sonu zafer ekranı) · diplomasi paneli (yerel benzetimle teklif/ittifak) — hepsi `errors none`. Gerçek iki tarayıcılı çok oyunculu bağlantı bu ortamda denenemedi (PeerJS sunucusuna erişim yok).
 
 Hepsi geçti (30 Ekim, son kod):
 - `smoke` — all checks passed
@@ -183,6 +199,11 @@ Hepsi geçti (30 Ekim, son kod):
 ---
 
 ## 8. Bilinen zayıflıklar / yapılacaklar
+
+- (10 Kasım) Çok oyunculu diplomasi ve kısa maç çok oyunculuda iki gerçek tarayıcıyla denenmedi. Kısa maçta güvenli bölgenin merkezi, herkes ülkesini seçene kadar oyuncudan oyuncuya biraz farklı olabilir (ayda bir yeniden hesaplanır).
+- (10 Kasım) Döndürülmüş bölge görünümü kodda var ama mevcut il gruplarında hiçbir il %30 eşiğini geçmiyor (çapraz ince il yok); yalnız daha iyi merkez seçimi etkili. Gerçekten çok uzun iller için kare olmayan arazi gerekir.
+- (10 Kasım) Doğal Earth nehirlerinde aynı nehir ülke sınırında farklı adlarla parçalı (Fırat/Euphrates/Al Furat); yer yer iki çizgi üst üste gelip nehri genişletiyor. Göller yok.
+- (10 Kasım) Mevsim değişince bölge görünümü kısa bir kararmayla yeniden kuruluyor (inşa modu açıkken beklenir).
 
 - Gerçek bir tarayıcıda (gerçek GPU) FPS hiç ölçülmedi. "Yüksek" kalitede AO ağır olabilir; Otomatik mod yavaşsa kendini düşürüyor.
 - Gece yok: gün döngüsü bilerek sabah kızıllığı / akşam altını ile sınırlı. Pencere ışığı akşamüstü hafif.

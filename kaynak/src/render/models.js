@@ -200,7 +200,7 @@ function wOilwell(){ return kitModel((K, g)=>{ g.add(pumpjack(K, 0, 0, 0, 0)); }
 function wFactory(){ return kitModel(K=>{ factoryModel(K, 0, 0, 0, 0, 'garage'); for(const sx of [-1.6, 1.6]){ const B=K.M4(0,0,0); K.part(B, new THREE.CylinderGeometry(.3,.4,4.4,10), '#7d7f86', sx, 2.2, -1.3); } }); }
 
 export const BUILDERS={ city:wCity, town:wTown, port:wPort, shipyard:wShipyard, base:wBase, mine:wMine, bank:wBank, garage:wGarage,
-  field:bField, farm:wFarm, forest:bForest, mountain:bMountain, choco:wChoco, fishery:wFishery, ranch:wRanch, oilwell:wOilwell, factory:wFactory };
+  field:bField, farm:wFarm, forest:bForest, mountain:bMountain, choco:wChoco, fishery:wFishery, ranch:wRanch, oilwell:wOilwell, factory:wFactory, mill:wFarm };
 
 // ---- cute blonde cat ----
 export function makeCat(){

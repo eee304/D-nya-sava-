@@ -406,3 +406,75 @@ button.upg:disabled { background: #3f3a31; color: #cbbf9f; border-color: #5a5244
 
 #woodChip b { color: #e8b878; }
 #taxInput.pending { outline: 2px solid #e8b84e; background: #3a2f18; }
+
+/* region compass: where north is (the view may be turned for long provinces, and the player can orbit) */
+#rhCompass { position:absolute; right:18px; top:118px; width:46px; height:46px; border-radius:50%; display:none; z-index:6; pointer-events:none;
+  background:radial-gradient(circle at 40% 35%, #fbf3dc, #d9c79b); border:2px solid #5b4630; box-shadow:0 2px 6px rgba(0,0,0,.35); }
+body.in-region #rhCompass { display:block; }
+#rhCompass i { position:absolute; left:50%; top:50%; width:0; height:0; margin-left:-6px; margin-top:-17px; border-left:6px solid transparent; border-right:6px solid transparent;
+  border-bottom:17px solid #b8322a; transform-origin:6px 17px; }
+#rhCompass i::after { content:''; position:absolute; left:-6px; top:17px; border-left:6px solid transparent; border-right:6px solid transparent; border-top:17px solid #3c3a36; }
+#rhCompass span { position:absolute; width:12px; height:12px; text-align:center; font:700 12px/1 Georgia, serif; color:#fff; text-shadow:0 1px 2px #000; }
+
+/* operation bar: phase of the campaign, supply, siege progress */
+#opBar { position:absolute; left:50%; bottom:140px; transform:translateX(-50%); z-index:12; display:none; min-width:300px; max-width:calc(100% - 24px);
+  padding:8px 12px; border-radius:10px; background:var(--glass); border:1px solid var(--line); box-shadow:var(--hud-shadow); backdrop-filter:blur(8px); font-size:13px; }
+#opBar.show { display:block; }
+body.in-region #opBar, body.cinematic #opBar { display:none !important; }
+#opBar .ob-row { display:flex; justify-content:space-between; gap:12px; align-items:baseline; }
+#opBar .ob-row + .ob-row { margin-top:3px; }
+#obSupply.ok { color:#8be38b; } #obSupply.cut { color:#ff7a6b; font-weight:700; }
+#opBar .ob-prog { height:5px; margin-top:6px; border-radius:3px; background:rgba(255,255,255,.12); overflow:hidden; display:none; }
+#opBar.siege .ob-prog { display:block; }
+#opBar .ob-prog i { display:block; height:100%; width:0; background:linear-gradient(90deg,#c9853a,#e8c55a); }
+
+#seasonChip { margin-left:8px; font-size:12px; opacity:.9; white-space:nowrap; }
+/* era events: a card on the right that waits for a decision (or picks the first choice after a while) */
+#eventCard { position:absolute; right:14px; top:84px; z-index:16; width:min(330px, calc(100% - 28px)); display:none; padding:12px 14px; border-radius:12px;
+  background:var(--glass); border:1px solid var(--line); box-shadow:var(--hud-shadow); backdrop-filter:blur(8px); }
+#eventCard.show { display:block; animation:evIn .35s ease-out; }
+@keyframes evIn { from { transform:translateX(30px); opacity:0; } to { transform:none; opacity:1; } }
+#eventCard .ev-head { display:flex; align-items:center; gap:8px; } #evIcon { font-size:22px; } #evTitle { flex:1; font-size:15px; }
+#evTimer { font-style:normal; font-size:11px; opacity:.6; }
+#evText { margin:7px 0 10px; font-size:13px; line-height:1.4; opacity:.92; }
+#evChoices { display:flex; flex-direction:column; gap:6px; }
+#evChoices button { text-align:left; padding:7px 10px; border-radius:8px; border:1px solid var(--line); background:rgba(255,255,255,.06); color:inherit; cursor:pointer; font-size:12.5px; }
+#evChoices button:hover { background:rgba(255,255,255,.14); }
+#evChoices button small { display:block; opacity:.7; font-size:11px; margin-top:2px; }
+#evChoices button:disabled { opacity:.4; cursor:not-allowed; }
+body.cinematic #eventCard { display:none !important; }
+
+.upg.repair { background:linear-gradient(180deg,#c9673a,#9c4424) !important; color:#fff !important; }
+
+/* diplomacy (multiplayer only) */
+.mp-only { display:none !important; } body.mp .mp-only { display:flex !important; }
+#diploPanel { position:absolute; right:12px; top:70px; z-index:12; width:400px; max-width:calc(100% - 24px); max-height:calc(100% - 170px); overflow-y:auto; display:none; flex-direction:column; gap:9px;
+  padding:12px 14px; background:var(--glass); border:1px solid var(--line); border-radius:12px; backdrop-filter:blur(8px); box-shadow:var(--hud-shadow); font-size:13px; }
+#diploPanel.show { display:flex; }
+.dp-note { margin:0; font-size:12px; opacity:.75; line-height:1.35; }
+.dp-pl { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:9px; background:rgba(255,255,255,.05); border:1px solid var(--line); }
+.dp-pl i { width:12px; height:12px; border-radius:3px; flex:none; } .dp-pl .nm { flex:1; } .dp-pl .nm small { display:block; opacity:.65; font-size:11px; }
+.dp-pl button, #dpOffer button, .dp-in button { padding:5px 9px; border-radius:7px; border:1px solid var(--line); background:rgba(255,255,255,.08); color:inherit; cursor:pointer; font-size:12px; }
+.dp-pl button:hover, .dp-in button:hover { background:rgba(255,255,255,.18); }
+.dp-ally { color:#8be38b; font-size:11px; font-weight:700; }
+.dp-row { display:flex; gap:6px; align-items:center; margin-top:5px; } .dp-row label { width:34px; opacity:.75; }
+.dp-row select, .dp-row input { flex:1; min-width:0; padding:5px 6px; border-radius:7px; border:1px solid var(--line); background:rgba(0,0,0,.25); color:inherit; }
+.dp-in { padding:8px; border-radius:9px; background:rgba(232,197,90,.1); border:1px solid rgba(232,197,90,.35); display:flex; flex-direction:column; gap:6px; }
+.dp-in .btns { display:flex; gap:6px; } .dp-empty { opacity:.6; }
+#diploAct .badge { position:absolute; top:3px; right:8px; min-width:15px; height:15px; border-radius:8px; background:#d9472b; color:#fff; font-size:10px; line-height:15px; text-align:center; }
+
+/* game mode switch on the era screen */
+.era-mode { display:flex; gap:10px; flex-wrap:wrap; margin:4px 0 14px; }
+.era-mode button { flex:1; min-width:220px; text-align:left; padding:10px 14px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.05); color:inherit; cursor:pointer; font-weight:700; font-size:14px; }
+.era-mode button small { display:block; font-weight:400; font-size:12px; opacity:.7; margin-top:2px; }
+.era-mode button.on { border-color:var(--brass); background:rgba(201,162,83,.16); box-shadow:inset 0 0 0 1px var(--brass); }
+#matchTimer { margin-left:8px; font-size:12px; white-space:nowrap; color:#ffd36a; display:none; } body.short-match #matchTimer { display:inline; }
+#matchEnd { position:absolute; inset:0; z-index:40; display:none; align-items:center; justify-content:center; background:rgba(8,12,20,.55); backdrop-filter:blur(3px); }
+#matchEnd.open { display:flex; }
+#matchEnd .me-box { width:min(440px, calc(100% - 32px)); padding:20px 22px; border-radius:14px; background:var(--glass); border:1px solid var(--line); box-shadow:var(--hud-shadow); }
+#matchEnd .eyebrow { font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--brass); }
+#matchEnd h2 { margin:6px 0 4px; } #matchEnd p { margin:0 0 10px; opacity:.8; }
+#meList { margin:0 0 14px; padding-left:22px; display:flex; flex-direction:column; gap:4px; } #meList li.me { color:#ffd36a; font-weight:700; }
+.me-btns { display:flex; gap:8px; } .me-btns button { padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:rgba(255,255,255,.08); color:inherit; cursor:pointer; }
+
+.lb-match { display:flex; gap:8px; align-items:center; font-size:13px; margin:8px 0 4px; opacity:.9; cursor:pointer; }

@@ -27,16 +27,44 @@ export function buildTerrain(info, B, rng) {
   // distance to the province border (negative inside); everything outside is a neighbour's land
   const provDist = GM ? (x, z) => GM.provAt(x, z) : (x, z) => Math.max(Math.abs(x), Math.abs(z)) - HALF;
 
-  // ---- river: meanders past the town, flows toward the sea when there is one
-  let RIVER = null;
-  if (B.river) {
+  // ---- rivers. With real geography (info.geo.rivers) the real rivers of the province, from the world map's river
+  // lines: smoothed, a little meander added, each with its own width. Without it the old invented river past the town.
+  const RIVERS = [];
+  if (GM) {
+    for (const rv of info.geo.rivers || []) {
+      // Chaikin smoothing twice, then resample every ~2.5 units with a sideways meander that grows with the width
+      let p = rv.pts;
+      for (let it = 0; it < 2; it++) { const q = [p[0]]; for (let i = 0; i < p.length - 1; i++) { const [ax, az] = p[i], [bx, bz] = p[i + 1]; q.push([ax * .75 + bx * .25, az * .75 + bz * .25], [ax * .25 + bx * .75, az * .25 + bz * .75]); } q.push(p[p.length - 1]); p = q; }
+      const L = polyLen(p); if (L < 6) continue;
+      const pts = [], amp = 1.2 + rv.w * .9;
+      for (let t = 0; t <= L; t += 2.5) { const a = along(p, t), m = (fbm(t * .025 + so, 7.7, 3) - .5) * 2 * amp * sstep(0, 12, t) * sstep(0, 12, L - t);
+        pts.push([a.x - a.dz * m, a.z + a.dx * m]); }
+      RIVERS.push({ n: rv.n, w: rv.w, pts });
+    }
+  } else if (B.river) {
     const flow = coast ? norm([coast.d[0] + (rng() - .5) * .9, coast.d[1] + (rng() - .5) * .9]) : norm([rng() - .5, rng() - .5]);
-    const perp = [-flow[1], flow[0]], side = rng() < .5 ? 1 : -1, off = (14 + rng() * 8) * side, ph = rng() * 6;
-    RIVER = [];
+    const perp = [-flow[1], flow[0]], side = rng() < .5 ? 1 : -1, off = (14 + rng() * 8) * side, ph = rng() * 6, pts = [];
     for (let t = -SIZE; t <= SIZE; t += 6) {
       const w = Math.sin(t * .045 + ph) * 7 + (fbm(t * .03 + so, 3.3, 2) - .5) * 10;
-      RIVER.push([flow[0] * t + perp[0] * (off + w), flow[1] * t + perp[1] * (off + w)]);
+      pts.push([flow[0] * t + perp[0] * (off + w), flow[1] * t + perp[1] * (off + w)]);
     }
+    RIVERS.push({ n: '', w: 1.5, pts });
+  }
+  const RIVER = RIVERS.length ? RIVERS[0].pts : null;   // (kept for older code: "is there a river")
+  // segments bucketed on a coarse grid so a distance query only looks at nearby river pieces
+  const RB = 12, RCAP = 48, rbuck = new Map();
+  for (const rv of RIVERS) for (let i = 0; i < rv.pts.length - 1; i++) {
+    const [ax, az] = rv.pts[i], [bx, bz] = rv.pts[i + 1], seg = [ax, az, bx, bz, rv.w - 1.5];
+    for (let gx = Math.floor(Math.min(ax, bx) / RB); gx <= Math.floor(Math.max(ax, bx) / RB); gx++)
+      for (let gz = Math.floor(Math.min(az, bz) / RB); gz <= Math.floor(Math.max(az, bz) / RB); gz++) { const key = gx * 4096 + gz; let b = rbuck.get(key); if (!b) rbuck.set(key, b = []); b.push(seg); }
+  }
+  // distance to the nearest river bank of a standard (1.5 half-width) river: wider rivers count as nearer
+  function riverRaw(x, z) {
+    if (!RIVERS.length) return 1e3;
+    let m = RCAP; const cx = Math.floor(x / RB), cz = Math.floor(z / RB), r = Math.ceil(RCAP / RB);
+    for (let gx = cx - r; gx <= cx + r; gx++) for (let gz = cz - r; gz <= cz + r; gz++) { const b = rbuck.get(gx * 4096 + gz); if (!b) continue;
+      for (const sg of b) { const d = segD(x, z, sg[0], sg[1], sg[2], sg[3]) - sg[4]; if (d < m) m = d; } }
+    return m;
   }
 
   // ---- four roads leave the town centre at right angles: a proper crossroads, straight through town, winding outside
@@ -66,7 +94,8 @@ export function buildTerrain(info, B, rng) {
     h = lerp(h, 1.1, sstep(townR + 7, townR - 1, td));
     // outside the province the land sinks to a low, flat shelf: the province stands up in its real shape, like on the world map
     if (GM && h > .3) { const pd = provDist(x, z); if (pd > -.6) h = lerp(h, Math.max(.3, .34 + (h - 1) * .1), sstep(-.6, 1.4, pd)); }
-    if (RIVER) { const rd = polyD(RIVER, x, z), w = 1.5; h = Math.min(h, lerp(-1.1, h, sstep(w, w + 3.5, rd))); }
+    // river bed: the water is about 2·(w + .6) wide; riverRaw counts wider rivers as nearer (rd = distance − w + 1.5)
+    if (RIVERS.length) { const rd = riverRaw(x, z); if (rd < 4) h = Math.min(h, lerp(-1.1, h, sstep(.6, 3.7, rd))); }
     return h;
   }
 
@@ -75,7 +104,7 @@ export function buildTerrain(info, B, rng) {
   for (let iz = 0; iz < N; iz++) for (let ix = 0; ix < N; ix++) {
     const x = -HALF + ix * STEP, z = -HALF + iz * STEP, i = iz * N + ix;
     HG[i] = Hraw(x, z); FG[i] = fbm(x * .07 + 100 + so, z * .07 + 50, 3); GG[i] = fbm(x * .12 + 30, z * .12 + so, 3);
-    RG[i] = RIVER ? polyD(RIVER, x, z) : 1e3; CG[i] = coastAt(x, z); PG[i] = provDist(x, z);
+    RG[i] = riverRaw(x, z); CG[i] = coastAt(x, z); PG[i] = provDist(x, z);
   }
   function samp(G, x, z) {
     const fx = clamp((x + HALF) / STEP, 0, N - 1.001), fz = clamp((z + HALF) / STEP, 0, N - 1.001);
@@ -87,12 +116,14 @@ export function buildTerrain(info, B, rng) {
   const riverDist = (x, z) => samp(RG, x, z);
   const forestAt = (x, z) => samp(FG, x, z);
 
-  // ---- bridges where roads cross the river
+  // ---- bridges where roads cross a river: one per crossing, as long as that river is wide
   const BRIDGES = [];
-  if (RIVER) for (const r of ROADS) {
-    let best = 1e9, bp = null; const L = polyLen(r);
-    for (let s = 0; s < L; s += .2) { const p = along(r, s); const dd = polyD(RIVER, p.x, p.z); if (dd < best) { best = dd; bp = p; } }
-    if (best < 1.5 && H(bp.x, bp.z) < .6) BRIDGES.push(bp);
+  for (const r of ROADS) for (const rv of RIVERS) {
+    const L = polyLen(r); let inside = false, best = 1e9, bp = null;
+    for (let s = 0; s < L; s += .25) { const p = along(r, s), dd = polyD(rv.pts, p.x, p.z) - (rv.w - 1.5);
+      if (dd < 2.2) { inside = true; if (dd < best) { best = dd; bp = p; } }
+      else if (inside) { if (H(bp.x, bp.z) < .6) BRIDGES.push({ ...bp, len: Math.max(8, 2 * (rv.w + .6) + 5) }); inside = false; best = 1e9; bp = null; } }
+    if (inside && bp && H(bp.x, bp.z) < .6) BRIDGES.push({ ...bp, len: Math.max(8, 2 * (rv.w + .6) + 5) });
   }
 
   // ---- fields around the town
@@ -115,7 +146,7 @@ export function buildTerrain(info, B, rng) {
     // the same height and forest functions without the grid, for the countryside around the playable square
   const forestRaw = (x, z) => fbm(x * .07 + 100 + so, z * .07 + 50, 3);
   const inProv = (x, z, m = 0) => samp(PG, x, z) < -m;   // inside this province, at least m from its border
-  return { TOWN, townR, crossAng: a0, coast, mtn, RIVER, ROADS, BRIDGES, FIELDS, HG, FG, GG, RG, CG, PG, provDist, inProv, geo: info.geo || null, H, slope, riverDist, forestAt, roadDist, inField, coastAt, samp, so, Hraw, forestRaw };
+  return { TOWN, townR, crossAng: a0, coast, mtn, RIVER, RIVERS, riverRaw, ROADS, BRIDGES, FIELDS, HG, FG, GG, RG, CG, PG, provDist, inProv, geo: info.geo || null, H, slope, riverDist, forestAt, roadDist, inField, coastAt, samp, so, Hraw, forestRaw };
 }
 
 // Paint the ground texture: grass variety, forest floor, sand, rock, snow, fields, roads, plaza.
@@ -167,8 +198,9 @@ export function paintGround(T, B, info, patches, S = 1536) {
     ctx.strokeStyle = 'rgba(60,80,30,.8)'; ctx.lineWidth = .25; ctx.strokeRect(-w / 2, -h / 2, w, h);
     ctx.restore();
   });
-  for (const [x, z, r, a] of patches) {
-    const g = ctx.createRadialGradient(x, z, 0, x, z, r); g.addColorStop(0, `rgba(120,98,66,${a})`); g.addColorStop(1, 'rgba(120,98,66,0)');
+  for (const [x, z, r, a, kind] of patches) {
+    const c = kind === 'scorch' ? '38,30,24' : '120,98,66';   // scorch: the ground round a burnt house
+    const g = ctx.createRadialGradient(x, z, 0, x, z, r); g.addColorStop(0, `rgba(${c},${a})`); g.addColorStop(kind === 'scorch' ? .55 : 1, `rgba(${c},${kind === 'scorch' ? a * .6 : 0})`); g.addColorStop(1, `rgba(${c},0)`);
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, z, r, 0, 7); ctx.fill();
   }
   const modern = info.era === '2014';
@@ -236,13 +268,13 @@ export function paintGround(T, B, info, patches, S = 1536) {
   }
   // the province border, inked like on the world map — only where land meets land (the coast draws itself)
   if (T.geo && T.geo.prov) {
-    const L = (x, z) => T.coastAt(x, z) < -1;
+    const L = (x, z) => T.coastAt(x, z) < -1 && T.riverRaw(x, z) > 2.6;   // (borders often run down a river: no ink on the water)
     ctx.lineCap = ctx.lineJoin = 'round';
     for (const [w, col] of [[.55, 'rgba(30,24,16,.55)'], [.22, info.ownerColor || '#e8c33a']]) {
       ctx.lineWidth = w; ctx.strokeStyle = col; ctx.beginPath();
       for (const r of T.geo.prov) for (let i2 = 0; i2 < r.length; i2++) {
         const [ax, az] = r[i2], [bx, bz] = r[(i2 + 1) % r.length], mx = (ax + bx) / 2, mz = (az + bz) / 2, dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz) || 1;
-        if (Math.abs(mx) > HALF || Math.abs(mz) > HALF || !L(mx + dz / l * 2, mz - dx / l * 2) || !L(mx - dz / l * 2, mz + dx / l * 2)) continue;
+        if (Math.abs(mx) > HALF || Math.abs(mz) > HALF || !L(mx, mz) || !L(mx + dz / l * 2, mz - dx / l * 2) || !L(mx - dz / l * 2, mz + dx / l * 2)) continue;
         ctx.moveTo(ax, az); ctx.lineTo(bx, bz);
       }
       ctx.stroke();
@@ -270,7 +302,7 @@ export function outerGround(T, B, R = 260, step = 2.5) {
       const g = fbm(x * .12 + 30, z * .12 + T.so, 3), f = T.forestRaw(x, z), dn = vnoise(x * .3, z * .3);
       c = mixc(G1, G2, g); c = mixc(c, DRY, sstep(.42, .25, g) * .55);
       c = mixc(c, FF, sstep(B.forest - .01, B.forest + .07, f) * .8 * (T.geo ? 0 : 1));
-      c = mixc(c, SAND, Math.max(sstep(-14, -6, T.coastAt(x, z)), T.RIVER ? sstep(5, 2.4, polyD(T.RIVER, x, z)) : 0) * sstep(1.05, .3, h));
+      c = mixc(c, SAND, Math.max(sstep(-14, -6, T.coastAt(x, z)), T.RIVER ? sstep(5, 2.4, T.riverRaw(x, z)) : 0) * sstep(1.05, .3, h));
       const sl = Math.hypot(T.Hraw(x + 1, z) - T.Hraw(x - 1, z), T.Hraw(x, z + 1) - T.Hraw(x, z - 1)) / 2 * .5;
       c = mixc(c, ROCK, Math.max(sstep(.5, .95, sl), sstep(5, 8.5, h)));
       if (B.snowy) c = mixc(c, SNOW, B.snowy * sstep(.45, .7, dn));

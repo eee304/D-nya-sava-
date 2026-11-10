@@ -31,7 +31,7 @@ function blob(lon, lat, list) {
   return [m, kind];
 }
 
-export function paintWorldTexture(projection, W, H) {
+export function paintWorldTexture(projection, W, H, rivers = []) {
   // ---- 1) low-res climate + relief field
   const LW = 1024, LH = Math.round(LW * H / W);
   const field = new Float32Array(LW * LH * 3), height = new Float32Array(LW * LH), forest = new Float32Array(LW * LH);
@@ -90,6 +90,16 @@ export function paintWorldTexture(projection, W, H) {
     ctx.fillStyle = `rgba(${18 + rnd() * 20},${50 + rnd() * 30},${18 + rnd() * 15},.55)`; ctx.beginPath(); ctx.arc(x, y, s, 0, 7); ctx.fill();
     ctx.fillStyle = 'rgba(160,200,110,.18)'; ctx.beginPath(); ctx.arc(x - s * .3, y - s * .3, s * .45, 0, 7); ctx.fill();
   }
+  // real rivers (Natural Earth), thicker for the great ones; drawn under the grain so they look painted
+  ctx.lineCap = ctx.lineJoin = 'round';
+  for (const pass of [0, 1]) for (const rv of rivers) {
+    if (rv.r > 8) continue;
+    const w = rv.r <= 2 ? 2.4 : rv.r <= 4 ? 1.8 : rv.r <= 6 ? 1.25 : .9;
+    ctx.beginPath(); let on = false;
+    for (const c of rv.c) { const q = projection(c); if (!q || !isFinite(q[0])) { on = false; continue; } const x = q[0] * HW / W, y = q[1] * HH / H; if (on) ctx.lineTo(x, y); else ctx.moveTo(x, y); on = true; }
+    if (pass === 0) { ctx.strokeStyle = 'rgba(70,90,60,.35)'; ctx.lineWidth = w + 1.6; } else { ctx.strokeStyle = 'rgba(64,112,140,.85)'; ctx.lineWidth = w; }
+    ctx.stroke();
+  }
   const im = ctx.getImageData(0, 0, HW, HH), d = im.data;
   for (let y = 0, o = 0; y < HH; y++) for (let x = 0; x < HW; x++, o += 4) {
     const k = .93 + hash(x, y) * .14;
@@ -130,18 +140,25 @@ export function landMaterial(map, detail) {
 
 // the same land look for ALL provinces in one mesh: each vertex carries its province's fill (tint) and hover glow (emis),
 // so the whole world map is one draw call instead of thousands
+// season on the world map: snow over the lands in winter (uv.y above uSnowN in the north / below uSnowS in the south)
+export const SEASON_U = { uSnowN: { value: 2 }, uSnowS: { value: -1 }, uSnowAmt: { value: 0 }, uAutumn: { value: 0 } };
 export function landMaterialMerged(map, detail) {
   const m = new THREE.MeshStandardMaterial({ map, vertexColors: true, roughness: .92, metalness: .02 });
   m.onBeforeCompile = sh => {
     sh.uniforms.detailMap = { value: detail };
+    Object.assign(sh.uniforms, SEASON_U);
     sh.vertexShader = 'attribute vec3 tint;\nattribute vec3 emis;\nvarying vec3 vTint;\nvarying vec3 vEmis;\n' +
       sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTint = tint; vEmis = emis;');
-    sh.fragmentShader = 'uniform sampler2D detailMap;\nvarying vec3 vTint;\nvarying vec3 vEmis;\n' + sh.fragmentShader.replace('#include <map_fragment>',
+    sh.fragmentShader = 'uniform sampler2D detailMap;\nuniform float uSnowN, uSnowS, uSnowAmt, uAutumn;\nvarying vec3 vTint;\nvarying vec3 vEmis;\n' + sh.fragmentShader.replace('#include <map_fragment>',
       'vec4 tx = texture2D(map, vMapUv);\n' +
       '  float lum = dot(tx.rgb, vec3(.3, .59, .11));\n' +
       '  diffuseColor.rgb = mix(tx.rgb, vTint * (.55 + .85 * lum), .58);\n' +
       '  if (vColor.r < .99) diffuseColor.rgb = vTint * .55;\n' +
-      '  diffuseColor.rgb *= mix(.9, 1.08, texture2D(detailMap, vMapUv * vec2(420.0, 220.0)).r);')
+      '  float dtl = texture2D(detailMap, vMapUv * vec2(420.0, 220.0)).r;\n' +
+      '  diffuseColor.rgb *= mix(.9, 1.08, dtl);\n' +
+      '  float sn = smoothstep(uSnowN, uSnowN + .025, vMapUv.y + (dtl - .5) * .02) + 1.0 - smoothstep(uSnowS - .025, uSnowS, vMapUv.y + (dtl - .5) * .02);\n' +
+      '  if (vColor.r > .99) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.92, .94, .96), clamp(sn, 0.0, 1.0) * uSnowAmt * (.7 + .3 * dtl));\n' +
+      '  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.08, .96, .78), uAutumn * .5);')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += vEmis;');
   };
   m.customProgramCacheKey = () => 'mbr-land-merged';

@@ -92,7 +92,7 @@ const CAR_COLORS = ['#d8433a', '#3f6fa8', '#e8c33a', '#f1ede4', '#2f3338', '#5a8
 function walkY(T, x, z) {
   for (const p of T.BRIDGES) {
     const dx = x - p.x, dz = z - p.z;
-    if (Math.abs(dx * p.dx + dz * p.dz) < 5.8 && Math.abs(-dx * p.dz + dz * p.dx) < 1.6) return 1.1;
+    if (Math.abs(dx * p.dx + dz * p.dz) < (p.len || 11) / 2 + .3 && Math.abs(-dx * p.dz + dz * p.dx) < 1.6) return 1.1;
   }
   const h = T.H(x, z); return h < .08 ? null : h;
 }

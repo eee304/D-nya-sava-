@@ -15,6 +15,7 @@ import { FX } from '../units/fx.js';
 import {
   Kit, house, landmark, wallSegment, tower, gateTower, barracks, mine, bank, factory, farmhouse, haystack, dock, bridge,
   flagTexture, makeFlag, makeWindmill, makeShip, animalGeo, ANIMAL_MAT, fishingBoat, pumpjack, box, cyl,
+  watermill, ruin,
 } from './builders.js';
 import { setWindowGlow } from './textures.js';
 import { RIGS } from './prefabs.js';
@@ -35,6 +36,7 @@ const ORES = {
   diamond: { color: '#c9f5ff', alt: '#e9fbff', metal: 0, rough: .04, glow: '#5ac8e8', clear: true, rock: '#5d6168' },
 };
 
+const mixHex = (a, b, t) => { const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); const A = p(a), Bc = p(b); return '#' + A.map((v, i) => Math.round(v + (Bc[i] - v) * t).toString(16).padStart(2, '0')).join(''); };
 export class RegionView {
   constructor(renderer, { keys, labelsEl, onExit, post, env }) {
     this.renderer = renderer; this.post = post; this.env = env; this.keys = keys; this.labelsEl = labelsEl; this.onExit = onExit;
@@ -69,6 +71,19 @@ export class RegionView {
       B.trees = Object.fromEntries(Object.entries(B.trees).map(([k, w]) => [k, w * (1 - extra)]));
       for (const [k, w] of Object.entries(flora.trees)) B.trees[k] = (B.trees[k] || 0) + w;
     }
+    // the season: snow on the ground and on the trees in winter (more the further from the equator), autumn colours
+    const al = Math.abs(info.lat), cold = biomeKey === 'temperate' || biomeKey === 'steppe' || biomeKey === 'boreal';
+    if (info.season === 'winter' && cold && al >= 33) {
+      const k = Math.min(1, (al - 33) / 10);
+      B.snowy = Math.max(B.snowy || 0, .45 + .5 * k); B.snowAt = Math.min(B.snowAt, 6);
+      B.grass = B.grass.map(c => mixHex(c, '#c9d0cb', .25 + .35 * k)); B.dry = mixHex(B.dry, '#cfd3cc', .4); B.floor = mixHex(B.floor, '#aeb7b2', .35 + .3 * k);
+      B.leaf = B.leaf.map((c, i) => mixHex(c, i % 2 ? '#e9eeec' : '#d2dbd7', .45 + .35 * k));
+      B.pine = ['#2f5530', '#2a4a2b', '#355f35', '#24442a'].map((c, i) => mixHex(c, '#e4ebe8', i % 2 ? .3 + .25 * k : .15 + .2 * k));
+      info.winter = k;
+    } else if (info.season === 'autumn' && cold && al >= 30) {
+      B.leaf = ['#c4782e', '#d9a03a', '#a8452a', '#8a6a2a', '#6f7a30', '#e0b84a', '#b95f2a'];
+      B.grass = B.grass.map(c => mixHex(c, '#a69a50', .25)); info.autumn = 1;
+    } else if (info.season === 'spring' && cold) B.grass = B.grass.map(c => mixHex(c, '#6fb03f', .18));
     const culture = cultureFor(info.lon, info.lat), era = info.era;
     info.biome = biomeKey; info.biomeLabel = B.label; info.culture = culture;
     const scene = this.scene = new THREE.Scene();
@@ -112,7 +127,7 @@ export class RegionView {
     for (const b of info.buildings) if (b.type === 'field') T.FIELDS.push([b.x, b.z, 6, 5, -roadAngle(b.x, b.z)]);
 
     const K = new Kit(), patches = []; K.hi = true;
-    this.flags = []; this.blades = []; this.ships = []; this.docks = []; this.basePos = null; this.forms = []; this.battle = null;
+    this.flags = []; this.blades = []; this.wheels = []; this.ruinSmoke = []; this._ruinsLeft = 0; this.ships = []; this.docks = []; this.basePos = null; this.forms = []; this.battle = null;
     this.pumps = []; this.boats = []; this.chimneys = []; this.herds = [];
     const ownerTex = flagTexture(info.ownerColor, info.isPlayer);
 
@@ -129,12 +144,17 @@ export class RegionView {
       for (let i = 0; i < count * 18 && placed < count; i++) {
         const a = rng() * Math.PI * 2, r = 3 + Math.pow(rng(), .8) * radius, x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r, s = (.85 + rng() * .45) * scale;
         if (!freeSpot(x, z, 1.1 * s)) continue;
-        const fr = house(K, x, T.H(x, z), z, roadAngle(x, z) + (rng() < .5 ? 0 : Math.PI / 2) + (rng() - .5) * .12, s, culture, era, rng, rural);
+        const ry = roadAngle(x, z) + (rng() < .5 ? 0 : Math.PI / 2) + (rng() - .5) * .12;
+        if (this._ruinsLeft > 0) {   // war damage: this house burnt down
+          this._ruinsLeft--; const fr = ruin(K, x, T.H(x, z), z, ry, s, rng);
+          obstacles.push([x, z, fr]); patches.push([x, z, fr * 2.2, .85, 'scorch']); this.ruinSmoke.push([x, T.H(x, z) + .6, z]); placed++; continue;
+        }
+        const fr = house(K, x, T.H(x, z), z, ry, s, culture, era, rng, rural);
         obstacles.push([x, z, fr]); patches.push([x, z, fr * 1.5, .4]); placed++;
       }
       return placed;
     };
-    const typeR = { city: 8, town: 5, base: 5.2, mine: 3, bank: 2.6, garage: 3.2, choco: 3.2, farm: 2.8, port: 2, shipyard: 2, field: 3.5, fishery: 2, ranch: 4, oilwell: 2.6, factory: 3.4 };
+    const typeR = { mill: 3, city: 8, town: 5, base: 5.2, mine: 3, bank: 2.6, garage: 3.2, choco: 3.2, farm: 2.8, port: 2, shipyard: 2, field: 3.5, fishery: 2, ranch: 4, oilwell: 2.6, factory: 3.4 };
     // everything later placement (incl. buildings added by the player in this view) needs
     this._ctx = { T, rng, culture, era, obstacles, occupied, freeSpot, findSpot, roadAngle, town, ownerTex, patches, typeR };
 
@@ -160,7 +180,8 @@ export class RegionView {
     // ---- capital houses fill the space left around the landmark and the player's buildings
     // (the player's provinces: a handful of cottages that grow into a town and a city as they are upgraded)
     const capCount = info.houses ?? [6, 14, 26, 40, 58][info.devLevel ?? 2];
-    town(K, 0, 0, info.houses != null ? Math.min(T.townR, 4 + capCount * .55) : T.townR, capCount, info.houses != null && info.houses < 6 ? .78 : 1);
+    this._ruinsLeft = info.scars ? info.scars.ruins + (info.houses == null ? 2 : 0) : 0;   // (a bigger foreign town loses a few more)
+    this.housesPlaced = town(K, 0, 0, info.houses != null ? Math.min(T.townR, 4 + capCount * .55) : T.townR, capCount, info.houses != null && info.houses < 6 ? .78 : 1);
 
     // ---- walls (1810 only; huts get a palisade-free village)
     if (info.isPlayer ? info.walls : (era !== '2014' && culture !== 'african' && info.walls !== false)) {   // our cities always get stone walls
@@ -260,7 +281,7 @@ export class RegionView {
     const T = this.T;
     for (const p of T.BRIDGES) {
       const dx = x - p.x, dz = z - p.z, a = dx * p.dx + dz * p.dz, c = -dx * p.dz + dz * p.dx;
-      if (Math.abs(a) < 5.8 && Math.abs(c) < 1.6) return 1.1;
+      if (Math.abs(a) < (p.len || 11) / 2 + .3 && Math.abs(c) < 1.6) return 1.1;
     }
     return Math.max(T.H(x, z), .05);
   }
@@ -293,6 +314,20 @@ export class RegionView {
       B.atk = new Formation(this.scene, { era, team: st.attColor, culture: st.attCulture || info.culture, count: 36, cols: 9, vehicles: 4, vehFront: true });   // armour leads
     } else if (scen === 'siege') {
       B.atk = new Formation(this.scene, { era, team: st.attColor, culture: st.attCulture || info.culture, count: 40, cols: 8, stance: 'loose' });
+      if (st.siege) {   // a siege that is still going on: the besiegers camp in tents just out of range of the walls
+        const camp = this.dryAlong(road, Math.min(L - 2, T.townR + 7 + 17), 1), ca = face(camp, hold), K = new Kit();
+        B.start = camp;
+        for (let i = 0; i < 9; i++) {
+          const side = i % 2 ? 1 : -1, off = 4 + (i >> 1) * 2.3, back = (i % 3) * 1.6 + 1, x = camp.x + Math.cos(ca) * side * off - Math.sin(ca) * back, z = camp.z - Math.sin(ca) * side * off - Math.cos(ca) * back;
+          if (T.H(x, z) < .4) continue;
+          const tb = K.M4(x, T.H(x, z), z, ca + (i % 3) * .3);
+          K.part(tb, new THREE.ConeGeometry(.95, 1.35, 4), i % 3 ? '#e8e0cc' : st.attColor, 0, .67, 0, Math.PI / 4);
+          K.part(tb, box(.08, 1.6, .08), '#5a4330', 0, .8, 0);
+          this.clearTrees(x, z, 1.6);
+        }
+        K.flush(this.scene);
+        for (let k = 0; k < 3; k++) { const x = camp.x + (k - 1) * 3, z = camp.z + 2; this.ruinSmoke.push([x, T.H(x, z) + .3, z]); }   // camp fires
+      }
       B.art = new Formation(this.scene, { era, team: st.attColor, culture: st.attCulture || info.culture, count: 8, cols: 8, vehicles: 5 }); B.extra.push(B.art);
       const back = this.dryAlong(road, Math.min(L - 2, T.townR + 7 + 24), 1);
       B.artPos = back; B.art.group.position.set(back.x, this.unitY(back.x, back.z), back.z); B.art.group.rotation.y = face(back, hold);
@@ -362,6 +397,10 @@ export class RegionView {
       fr = factory(K, x, y, z, rot, 'garage');
       for (const sx of [-1.6, 1.6]) { const B = K.M4(x, y, z, rot); K.part(B, cyl(.3, .4, 4.4, 10), '#7d7f86', sx, 2.2, -1.3); }
       for (const sx of [-1.6, 1.6]) this.chimneys.push([x + Math.cos(rot) * sx - Math.sin(rot) * -1.3, y + 4.6, z - Math.sin(rot) * sx + Math.cos(rot) * -1.3]);
+    } else if (b.type === 'mill') {
+      // turn the wheel side to the nearest water
+      let ba = 0, bd = 1e9; for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2, d = T.riverDist(x + Math.cos(a) * 3, z + Math.sin(a) * 3); if (d < bd) { bd = d; ba = a; } }
+      const m = watermill(K, x, y, z, -ba, era); scene.add(m.wheel); this.wheels.push(m.wheel); fr = m.fr;
     } else if (b.type === 'mine') fr = mine(K, x, y, z, rot, rng);
     else if (b.type === 'bank') fr = bank(K, x, y, z, rot);
     else if (b.type === 'garage' || b.type === 'choco') fr = factory(K, x, y, z, rot, b.type);
@@ -715,6 +754,12 @@ export class RegionView {
       const ok = T.H(x, z) > .2 && T.H(x, z) < 1.4 && [...Array(16)].some((_, i) => { const a = i / 16 * Math.PI * 2; return T.H(x + Math.cos(a) * 6, z + Math.sin(a) * 6) < -.5; });
       return !T.inProv(x, z, .3) ? 'outside' : !ok ? 'coast' : occupied(x, z, 1.6) ? 'building' : this.hasTree(x, z, 1.8) ? 'forest' : null;
     }
+    if (type === 'mill') {   // on a river bank: its wheel dips into the water
+      if (!T.inProv(x, z, .3)) return 'outside';
+      if (T.riverDist(x, z) > 6.5 || T.riverDist(x, z) < 2.6) return 'river';
+      if (T.H(x, z) < .35 || T.slope(x, z) > 1.1 || T.roadDist(x, z) < 2.8) return 'ground';
+      return occupied(x, z, 1.8) ? 'building' : this.hasTree(x, z, 1.4) ? 'forest' : null;
+    }
     // sample the whole footprint: a 6×5 rectangle for fields, a disc for buildings
     const pts = [];
     if (type === 'field') { const c = Math.cos(rot), s = Math.sin(rot); for (let u = -3; u <= 3.01; u += 1) for (let v = -2.5; v <= 2.51; v += 1.25) pts.push([x + u * c + v * s, z - u * s + v * c]); }
@@ -890,6 +935,7 @@ export class RegionView {
       p.needsUpdate = true;
     }
     this.blades.forEach((b, i) => b.children.forEach((a, j) => { a.rotation.z = j * Math.PI / 2 + t * (.7 + i * .15); }));
+    for (const w of this.wheels) w.rotateX(-dt * .9);
     // armies
     const B = this.battle;
     if (B) {
@@ -929,6 +975,8 @@ export class RegionView {
     if (this.fx && hn && !this.battle && Math.random() < dt * Math.min(6, hn * (this.info.era === '2014' ? .04 : .15))) {
       const c = this.hearths[Math.floor(Math.random() * hn)]; this.fx.puff(c.x, c.y, c.z, .45, 4.5, '#cfcac2', .35);
     }
+    // burnt houses still smoulder
+    if (this.fx && this.ruinSmoke.length && Math.random() < dt * 1.6) { const c = this.ruinSmoke[Math.floor(Math.random() * this.ruinSmoke.length)]; this.fx.puff(c[0] + (Math.random() - .5) * .6, c[1], c[2] + (Math.random() - .5) * .6, .7, 5, '#3d3a37', .55); }
     if (this.fx && this.chimneys.length && Math.random() < dt * 2.5) { const c = this.chimneys[Math.floor(Math.random() * this.chimneys.length)]; this.fx.puff(c[0], c[1], c[2], 1.1, 4, '#9a9a9a', .6); }
     // animals graze: each wanders to a new spot inside its pasture, stops, lowers its head, moves on
     const ho = this._ho || (this._ho = new THREE.Object3D());

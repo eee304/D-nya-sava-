@@ -30,7 +30,7 @@ export const TOWN_POP = 250;
 export const ARMY_UNIT = 100;         // soldiers per recruitment unit
 export const ARMY_UNIT_COST = 600;    // cost for one 100-soldier unit (scales with amount)
 export const ARMY_UNIT_POP = 20;      // people drafted per 100 soldiers: a country fields armies far bigger than its town populations
-export const COSTS = { city: 5000, town: 2500, base: 5000, bank: 3000, mine: 1000, field: 700, farm: 1000, port: 5000, shipyard: 7000, choco: 8000, garage: 1000, fishery: 2000, ranch: 1500, oilwell: 4000, factory: 6000 };
+export const COSTS = { city: 5000, town: 2500, base: 5000, bank: 3000, mine: 1000, field: 700, farm: 1000, port: 5000, shipyard: 7000, choco: 8000, garage: 1000, fishery: 2000, ranch: 1500, oilwell: 4000, factory: 6000, mill: 1500 };
 export const TANK_COST_MONEY = 1500, TANK_COST_POP = 10, TANK_COST_IRON = 20, TANK_ARMY = 500; // each tank adds 500 army power
 export const SHIP_COST = 3000;
 export const BATTLE_TIME=10; // seconds of clash before resolution (long enough to watch)
@@ -45,12 +45,15 @@ export const SETTLE_POP = [0, 250, 500, 750];          // population cap added b
 export const UPGRADE_BASE = { money: 2500, bread: 250, wood: 60 };
 export const UPGRADE_MULT = 1.5;
 export const WOOD_PER_TREE = 1;                         // wood gathered per felled tree (1810)
-export const WOOD_COSTS = { port: 40, shipyard: 60, fishery: 25 };   // 1810: piers are built of timber
+export const WOOD_COSTS = { port: 40, shipyard: 60, fishery: 25, mill: 30 };   // 1810: piers are built of timber
 export const SHIP_WOOD_1810 = 30;                       // a sailing ship needs timber
 export const TANK_TECH = 10, SHIP_TECH = 25;            // 2014: tanks and warships need technology
 export const CANNON_COST_MONEY = 1000;                  // 1810 cannon (replaces tanks)
 
 let LABEL_ERA = '2014';
 export function setLabelEra(e){ LABEL_ERA = e; }
-export function b_label(t){ if(t==='garage' && LABEL_ERA==='1810') return 'Top Dökümhanesi'; return ({fishery:'Balıkçı Limanı',ranch:'Hayvancılık Çiftliği',oilwell:'Petrol Kuyusu',factory:'Sanayi Fabrikası',city:'Şehir',town:'Kasaba',port:'Liman',shipyard:'Tersane',base:'Askeri Üs',mine:'Maden Ocağı',bank:'Banka',garage:'Garaj',
+export function b_label(t){ if(t==='garage' && LABEL_ERA==='1810') return 'Top Dökümhanesi'; return ({mill:'Su Değirmeni',fishery:'Balıkçı Limanı',ranch:'Hayvancılık Çiftliği',oilwell:'Petrol Kuyusu',factory:'Sanayi Fabrikası',city:'Şehir',town:'Kasaba',port:'Liman',shipyard:'Tersane',base:'Askeri Üs',mine:'Maden Ocağı',bank:'Banka',garage:'Garaj',
   field:'Tarla',farm:'Çiftlik',forest:'Orman',mountain:'Dağ',choco:'Çikolata Fabrikası'})[t]||t; }
+
+// ---- rivers: a field by a river yields more; each watermill in a province grinds more bread from its fields (up to 2)
+export const RIVER_FIELD_MULT = 1.5, MILL_BONUS = .25, MILL_MAX = 2;

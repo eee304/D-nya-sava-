@@ -138,7 +138,7 @@ export function addVegetation(scene, T, B, rng, canPlace, blocked = null) {
       dmy.position.set(t.x, t.y - .05, t.z); dmy.rotation.set(0, t.r, 0); dmy.scale.setScalar(t.s); dmy.updateMatrix();
       crown.setMatrixAt(i, dmy.matrix); if (trunk) trunk.setMatrixAt(i, dmy.matrix);
       items.push({ x: t.x, z: t.z, i, tree: true, kind, s: t.s, y: t.y - .05, r: t.r, meshes: trunk ? [crown, trunk] : [crown], crown });
-      const pal = LEAF[kind] || (kind === 'pine' ? ['#2f5530', '#2a4a2b', '#355f35', '#24442a'] : B.leaf);
+      const pal = LEAF[kind] || (kind === 'pine' ? (B.pine || ['#2f5530', '#2a4a2b', '#355f35', '#24442a']) : B.leaf);
       crown.setColorAt(i, col.set(pal[Math.floor(t.c * pal.length)]).multiplyScalar(.85 + t.ck * .3));
     });
     for (const m of [crown, trunk]) if (m) { m.castShadow = true; m.receiveShadow = true; scene.add(m); meshes.push(m); }
@@ -206,7 +206,7 @@ export function addOuterTrees(scene, T, B, rng, R = SIZE / 2 + 130) {
     const list = trees.filter(t => t.kind === kind); if (!list.length) continue;
     const crown = new THREE.InstancedMesh(crownGeo(kind, 0, true), windy(new THREE.MeshStandardMaterial({ roughness: .9, vertexColors: true, side: kind === 'palm' ? THREE.DoubleSide : THREE.FrontSide }), SWAY), list.length);
     const tg = trunkGeo(kind), trunk = tg ? new THREE.InstancedMesh(tg, windy(new THREE.MeshStandardMaterial({ color: '#5a4330', roughness: 1 }), SWAY), list.length) : null;
-    const pal = LEAF[kind] || (kind === 'pine' ? ['#2f5530', '#2a4a2b', '#355f35', '#24442a'] : B.leaf);
+    const pal = LEAF[kind] || (kind === 'pine' ? (B.pine || ['#2f5530', '#2a4a2b', '#355f35', '#24442a']) : B.leaf);
     list.forEach((t, i) => {
       dmy.position.set(t.x, t.y - .05, t.z); dmy.rotation.set(0, t.r, 0); dmy.scale.setScalar(t.s); dmy.updateMatrix();
       crown.setMatrixAt(i, dmy.matrix); if (trunk) trunk.setMatrixAt(i, dmy.matrix);

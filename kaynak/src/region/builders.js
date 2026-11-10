@@ -371,6 +371,49 @@ export function farmhouse(K, x, y, z, rot) {
   K.part(B, cyl(.6, .6, 3.2, 12), '#c9c4b8', 2.2, 1.3, -.8); K.part(B, dome(.62, 12), '#8a8f96', 2.2, 2.9, -.8);
   return 2.8;
 }
+// a watermill on a river bank: stone ground floor, timber-and-plaster upper floor, a turning wheel on the river side.
+// Local +x faces the water. Returns the footprint radius and the wheel (a Group the view turns every frame).
+export function watermill(K, x, y, z, rot, era = '1810') {
+  const B = K.M4(x, y, z, rot);
+  K.part(B, box(2.4, 1.1, 2.2), '#9d9384', 0, .45, 0);                       // stone mill-house
+  K.part(B, box(2.3, 1.0, 2.1), era === '2014' ? '#d9d3c4' : '#e3d8bd', 0, 1.5, 0);   // plaster upper floor
+  for (const sx of [-1.1, 1.1]) for (const sz of [-1.0, 1.0]) K.part(B, box(.12, 1.0, .12), '#5e4630', sx, 1.5, sz);   // timber corners
+  K.part(B, box(2.36, .1, 2.16), '#5e4630', 0, 1.02, 0);
+  K.part(B, gable(2.9, 2.7, 1.15), '#8a4a30', 0, 2.0, 0);
+  K.part(B, box(.6, .9, .06), '#4a3424', -.4, .45, 1.11); K.part(B, box(.36, .36, .06), '#3a4656', .5, 1.55, 1.06);
+  K.part(B, box(.36, .36, .06), '#3a4656', -.5, 1.55, 1.06);
+  K.part(B, box(.9, .25, .35), '#6e5238', 1.55, 1.75, 0);                      // the axle housing
+  K.part(B, box(.18, .9, .18), '#5e4630', 1.95, .7, -.55); K.part(B, box(.18, .9, .18), '#5e4630', 1.95, .7, .55);
+  // sacks of flour by the door
+  for (let i = 0; i < 3; i++) K.part(B, cyl(.17, .2, .38, 8), '#e9e1cc', -.95 + i * .32, .19, 1.45);
+  const wheel = new THREE.Group(), R = 1.15, wood = K.mat('#6b4c30'), dark = K.mat('#4e3824');
+  for (const off of [-.28, .28]) { const rim = new THREE.Mesh(new THREE.TorusGeometry(R, .07, 6, 22), wood); rim.position.x = off; rim.rotation.y = Math.PI / 2; rim.castShadow = true; wheel.add(rim); }
+  for (let k = 0; k < 6; k++) { const sp = new THREE.Mesh(box(.08, 2 * R, .1), dark); sp.rotation.x = k * Math.PI / 6; wheel.add(sp); }
+  for (let k = 0; k < 12; k++) { const a = k / 12 * Math.PI * 2, pd = new THREE.Mesh(box(.62, .08, .32), wood); pd.position.set(0, Math.cos(a) * (R + .05), Math.sin(a) * (R + .05)); pd.rotation.x = -a; pd.castShadow = true; wheel.add(pd); }
+  const hubm = new THREE.Mesh(cyl(.16, .16, .8, 8), dark); hubm.rotation.z = Math.PI / 2; wheel.add(hubm);
+  const c = Math.cos(rot), s = Math.sin(rot), lx = 2.35, lz = 0;
+  wheel.position.set(x + lx * c + lz * s, y + 1.0, z - lx * s + lz * c); wheel.rotation.y = rot;
+  return { fr: 2.6, wheel };
+}
+// a house burnt in the war: blackened wall stumps with jagged tops, the roof fallen in as charred beams, rubble — no roof
+export function ruin(K, x, y, z, rot, s, rng) {
+  const B = K.M4(x, y, z, rot, s * 1.2), w = 1.7, d = 1.4, wall = '#6a5d50', burnt = '#3a312b', soot = '#211c19', ash = '#7d7469';
+  K.part(B, box(w + .1, .16, d + .1), '#4d443c', 0, .03, 0);
+  // front wall: three uneven pieces, the doorway gaping
+  K.part(B, box(.55, .95, .15), wall, -w / 2 + .27, .48, d / 2); K.part(B, box(.45, .55 + rng() * .2, .15), burnt, w / 2 - .22, .3, d / 2);
+  K.part(B, box(.3, .25, .15), soot, .05, 1.0, d / 2);
+  // back wall stands higher, gable end blackened
+  K.part(B, box(w, 1.05, .15), wall, 0, .53, -d / 2); K.part(B, box(w * .55, .35, .15), soot, -.25, 1.2, -d / 2);
+  K.part(B, box(.15, .85, d), wall, w / 2, .43, 0); K.part(B, box(.15, .4, d * .6), burnt, -w / 2, .2, .25);
+  // the roof came down: two charred rafters leaning on the back wall, a scorched slab of roof inside
+  K.part(B, box(.12, .12, 1.7), soot, .3, .62, -.05, .2, .55, 0);
+  K.part(B, box(.12, .12, 1.5), soot, -.35, .5, .05, -.25, .45, .15);
+  K.part(B, box(1.1, .07, .9), burnt, .05, .3, .1, .3, .32, .1);
+  for (let i = 0; i < 9; i++) K.part(B, box(.2 + rng() * .25, .1 + rng() * .14, .2 + rng() * .22), i % 3 ? ash : soot, (rng() - .5) * 1.5, .08, (rng() - .5) * 1.2, rng() * 3);
+  // embers still glowing in the ashes
+  for (let i = 0; i < 3; i++) K.part(B, box(.14, .06, .14), '#e2632a', (rng() - .5) * .9, .13, (rng() - .5) * .7, rng() * 3);
+  return 1.3 * s;
+}
 export function haystack(K, x, y, z) {
   const B = K.M4(x, y, z);
   K.part(B, cyl(.4, .45, .5, 10), '#d9b85a', 0, .25, 0); K.part(B, cone(.45, .5, 10), '#c9a54a', 0, .75, 0);
@@ -382,10 +425,11 @@ export function dock(K, sx, sz, dir, len) {
   for (let k = 0; k < 4; k++) K.part(B, box(.45, .45, .45), '#7a5a3e', -.4 + (k % 2) * .5, .75, -len / 2 + 1 + Math.floor(k / 2) * .6);
 }
 export function bridge(K, p) {
-  const B = K.M4(p.x, 0, p.z, Math.atan2(p.dx, p.dz)), L = 11;
+  const B = K.M4(p.x, 0, p.z, Math.atan2(p.dx, p.dz)), L = p.len || 11;
   K.part(B, box(2.4, .3, L), '#a59a86', 0, .95, 0);
   for (const s of [-1.15, 1.15]) K.part(B, box(.18, .35, L), '#8e8472', s, 1.25, 0);
-  for (const k of [-3, 0, 3]) K.part(B, box(2.6, 2.4, .8), '#9a9080', 0, -.3, k);
+  // piers every ~3.5 units across the river (a long bridge over the Danube has many)
+  const np = Math.max(3, Math.round(L / 3.6)); for (let i = 0; i < np; i++) K.part(B, box(2.6, 2.4, .8), '#9a9080', 0, -.3, (i / (np - 1) - .5) * (L - 5));
 }
 
 // ---- animated pieces ----

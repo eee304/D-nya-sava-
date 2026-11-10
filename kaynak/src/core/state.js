@@ -7,7 +7,7 @@ export const S = {
   population: 0,           // current population (grows up to the cap)
   popCap: 100,             // population limit; +500 per city, +250 per town
   iron: 0,                 // mined from iron deposits
-  bread: 0,                // from fields
+  bread: 150,              // from fields (a little in the granary at the start: the people eat every month)
   wood: 0,                 // felled in forests (1810)
   taxPerPerson: 2,         // money collected per person per month
   _upkeepDebt: 0,          // accumulates fractional daily upkeep
@@ -49,6 +49,13 @@ export const S = {
   cleared: {},
   dug: {},                 // provinceId -> indices of ore rocks already dug             // provinceId -> felled tree positions (region coords, 'x,z' keys)
   troops: {},              // provinceId -> our soldiers stationed there (S.army = total incl. troops on the move)
+  mills: {},               // provinceId -> watermills (recounted from the buildings, not saved)
+  scars: {},               // provinceId -> war damage { day, ruins:[house indices], fields:n } until rebuilt
+  weary: 0,                // war weariness 0..40 (anger points): lost battles, long campaigns
+  events: [],              // active era events { id, until (game day), ... }
+  nextEventDay: 0,         // game day of the next random event
+  sieges: {},              // provinceId -> { bot, day, until } an enemy is besieging one of our walled provinces
+  match: null,             // short match { endDay, zone:{x,z,r0}, ... } or null for the open-ended game
   currentEra: '2014',
 };
 

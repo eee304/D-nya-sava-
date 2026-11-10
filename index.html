@@ -6,8 +6,8 @@
 <title>Map Battle Royale</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;800&display=swap">
-  <script type="module" crossorigin src="./assets/index-DINXMrDe.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-DMx-gaN3.css">
+  <script type="module" crossorigin src="./assets/index-Dy2bsHWa.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-SGUtK-Np.css">
 </head>
 <body>
   <div id="wrap">
@@ -25,9 +25,9 @@
         <div class="r"><i>Gıda</i><b id="foodVal">0</b><em id="foodState"></em></div>
         <div class="r" id="oilChip"><i id="oilLbl">Petrol</i><b id="oilVal">0</b></div>
         <div class="r" id="techChip"><i id="techLbl">Teknoloji</i><b id="techVal">0</b><em id="techBonus"></em></div>
-        <div class="r" id="angerChip"><i>Halk öfkesi</i><b id="angerVal">%0</b></div>
+        <div class="r" id="angerChip" title=""><i>Halk öfkesi</i><b id="angerVal">%0</b></div>
       </div>
-      <div id="calendar"><span id="skyIcon" title="Günün saati takvimle birlikte değişir">☀️</span><span id="calDate">1 Ocak 2014</span>
+      <div id="calendar"><span id="skyIcon" title="Günün saati takvimle birlikte değişir">☀️</span><span id="calDate">1 Ocak 2014</span><span id="seasonChip" title="Mevsim"></span><span id="matchTimer" title="Kısa maç: kalan süre · güvenli bölge"></span>
         <div id="speed" role="group" aria-label="Oyun hızı">
           <button type="button" data-speed="0" title="Durdur (Boşluk)">❚❚</button><button type="button" data-speed="1" class="on" title="Normal hız (1)">1×</button><button type="button" data-speed="2" title="Hızlı (2)">2×</button><button type="button" data-speed="4" title="Çok hızlı (3)">4×</button>
           <button type="button" id="gfxBtn" title="Grafik kalitesi: tıkla ve değiştir (yavaşsa Düşük seç)">✦</button>
@@ -47,7 +47,7 @@
       <div class="ctx-kv"><span>Garnizon</span><b id="pvTroops">0</b><span>Binalar</span><b id="pvBuild">yok</b><span>Vergi katkısı</span><b id="pvTax">+%0</b></div>
       <div id="pvMove"><label for="pvMoveN">Taşınacak asker: <b id="pvMoveLbl">0</b></label><input id="pvMoveN" type="range" min="0" max="0" step="100" value="0"><button id="pvMoveBtn" type="button">🪖 Asker taşı → hedef bölgeye tıkla</button></div>
       <div id="pvSpec"><div class="pv-spec-row"><button type="button" data-spec="tarim">🌾 Tarım</button><button type="button" data-spec="sanayi">⚙️ Sanayi</button><button type="button" data-spec="askeri">🪖 Askeri</button><button type="button" data-spec="ticaret">💰 Ticaret</button></div><small id="pvSpecDesc"></small></div>
-      <button id="pvUpgrade" class="upg" type="button"></button>
+      <button id="pvUpgrade" class="upg" type="button"></button><button id="pvRepair" class="upg repair" type="button" style="display:none"></button>
       <div class="pv-btns"><button id="pvRecruit" type="button">Asker al</button><button id="pvBuildHere" type="button">İnşa et</button><button id="pvRegion" type="button">🔍 Bölgeye in</button></div>
     </div>
     <div id="tradePanel">
@@ -56,6 +56,19 @@
       <div id="trGoods"></div>
       <div class="tr-sub">Takas teklifleri</div>
       <div id="trOffers"></div>
+    </div>
+    <div id="diploPanel">
+      <div class="tr-head"><b>🤝 Diplomasi</b><button id="dpClose" type="button" title="Kapat (Esc)">✕</button></div>
+      <p class="dp-note">Diğer oyunculara mal veya para teklif et, ittifak kur. Müttefikler birbirine saldıramaz ve harekâtlarında birbirinin topraklarından ikmal alır.</p>
+      <div id="dpPlayers"></div>
+      <div id="dpOffer" hidden>
+        <div class="tr-sub">Teklif: <b id="dpTo"></b></div>
+        <div class="dp-row"><label>Ver</label><select id="dpGive"></select><input id="dpGiveN" type="number" min="1" value="100"></div>
+        <div class="dp-row"><label>İste</label><select id="dpWant"></select><input id="dpWantN" type="number" min="0" value="100"></div>
+        <div class="dp-row"><button id="dpSend" type="button" class="mm-primary">Teklifi gönder</button><button id="dpCancel" type="button">Vazgeç</button></div>
+      </div>
+      <div class="tr-sub">Gelen teklifler</div>
+      <div id="dpInbox"><small class="dp-empty">Şimdilik yok.</small></div>
     </div>
     <div id="garrisonLabels"></div>
     <div id="woodPop"><div class="wp-head"><b id="woodPopTitle"></b><button id="woodPopClose" type="button" title="Kapat">✕</button></div><button id="woodPopBtn" type="button"></button><small id="woodPopNote">Köylüler 5 saniye çalışır; ağaçlar devrilir, yerine inşaat yapılabilir.</small></div>
@@ -68,6 +81,7 @@
       <button id="resBtn" class="act " type="button" title="Kaynaklar"><svg viewBox="0 0 24 24"><path d="M4 18l5-9 4 6 3-4 4 7z"/></svg><span>Kaynaklar</span></button>
       <button id="taxAct" class="act " type="button" title="Vergi"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M9 15l6-6M9.5 9.5h.01M14.5 14.5h.01"/></svg><span>Vergi</span></button>
       <button id="tradeAct" class="act " type="button" title="Ticaret"><svg viewBox="0 0 24 24"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg><span>Ticaret</span></button>
+      <button id="diploAct" class="act mp-only" type="button" title="Diplomasi"><svg viewBox="0 0 24 24"><path d="M3 12l4-4 4 3 3-3 7 6-4 4-3-2-3 3-4-3z"/></svg><span>Diplomasi</span></button>
       <button id="rankBtn" class="act " type="button" title="Sıralama"><svg viewBox="0 0 24 24"><path d="M5 20V12M12 20V5M19 20v-6"/></svg><span>Sıralama</span></button>
       <button id="regionBtn" class="act " type="button" title="Bölge"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg><span>Bölge</span></button>
       <button id="resetBtn" class="act " type="button" title="Görünüm"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></svg><span>Görünüm</span></button>
@@ -91,9 +105,10 @@
     <div id="selectVignette"></div>
     <div id="empireLabels"></div>
     <div id="regionLabels" style="display:none"></div>
+    <div id="rhCompass" title="Kuzey"><span>K</span><i></i></div>
     <div id="regionHud">
       <div class="rh-title"><b id="rhName"></b><span id="rhSub"></span></div>
-      <div class="rh-btns"><button id="rhUpgrade" class="upg" type="button"></button><button id="rhManage" type="button">⚙️ Bölge yönetimi</button><button id="rhBack">🗺️ Dünya haritası</button></div>
+      <div class="rh-btns"><button id="rhUpgrade" class="upg" type="button"></button><button id="rhRepair" class="upg repair" type="button" style="display:none"></button><button id="rhManage" type="button">⚙️ Bölge yönetimi</button><button id="rhBack">🗺️ Dünya haritası</button></div>
       <div class="rh-hint">Sol tık sürükle: kaydır · Sağ tık: döndür · Tekerlek: yakınlaş · Sonuna kadar uzaklaş: dünya haritası</div>
     </div>
     <div id="pickPreview"><img id="ppFlag" alt=""><span id="ppGlobe">🌐</span><b id="ppName"></b><span id="ppInfo"></span><span id="ppIdent"></span><small id="ppHint">Seçmek için tıkla</small></div>
@@ -143,6 +158,7 @@
           <input id="joinInput" maxlength="6" inputmode="numeric" placeholder="Kod gir (6 hane)" autocomplete="off">
           <button id="joinBtn" class="mm-btn lb-small">Katıl</button>
         </div>
+        <label class="lb-match"><input type="checkbox" id="lbShort"> ⏱️ Kısa maç (40 dk, daralan bölge) — kurucu seçer</label>
         <div class="lb-label">Oyuncular (<span id="lbCount">0</span>/5)</div>
         <div id="lbPlayers"></div>
         <button id="readyBtn" class="mm-btn mm-primary">Hazır</button>
@@ -174,6 +190,10 @@
           <button id="eraBack" class="era-back" type="button">← Geri</button>
           <div class="eyebrow">Tek oyunculu</div>
           <h2 class="era-title">Hangi dünyada savaşacaksın?</h2>
+        </div>
+        <div class="era-mode" role="group" aria-label="Oyun türü">
+          <button type="button" data-mode="long" class="on">♾️ Uzun oyun<small>Sınırsız süre, bütün dünya</small></button>
+          <button type="button" data-mode="short">⏱️ Kısa maç · 40 dk<small>Küçük harita, daralan bölge, en büyük imparatorluk kazanır</small></button>
         </div>
         <div class="era-cards">
           <button id="era1810" class="era-card" type="button">
@@ -219,6 +239,11 @@
     </div>
     <div id="dangerVignette"></div>
     <div id="rebelBar">🔥 İsyan! Ateşlere tıklayıp asker gönder: <span id="rebelFires">0</span>/5 · <span id="rebelTimer">2:00</span></div>
+    <div id="matchEnd"><div class="me-box"><div class="eyebrow">Kısa maç bitti</div><h2 id="meTitle"></h2><p id="meSub"></p><ol id="meList"></ol>
+      <div class="me-btns"><button id="meMenu" type="button" class="mm-primary">Ana menü</button><button id="meStay" type="button">Haritada kal</button></div></div></div>
+    <div id="eventCard" role="dialog" aria-live="polite"><div class="ev-head"><span id="evIcon"></span><b id="evTitle"></b><em id="evTimer"></em></div><p id="evText"></p><div id="evChoices"></div></div>
+    <div id="opBar"><div class="ob-row"><b id="obPhase"></b><span id="obForce"></span></div>
+      <div class="ob-row"><span id="obSupply"></span><span id="obSiege"></span></div><div class="ob-prog"><i id="obProg"></i></div></div>
     <button id="cancelOpBtn" type="button" title="Ordu kaynağına geri döner">↩️ Harekâtı iptal et</button>
     <button id="sendArmyBtn">🪖 1000 asker gönder</button>
     <div id="rebelModal">
@@ -250,6 +275,7 @@
       <button class="bopt" data-b="port">⚓ Liman (5000)<span class="binfo">Gelir yok · Gider: -33/gün</span></button>
       <button class="bopt" data-b="shipyard">🚢 Tersane (7000)<span class="binfo">Gelir yok · Gider: -33/gün</span></button>
       <button class="bopt" data-b="field">🌾 Tarla (700)<span class="binfo">Ekmek: +1/sn · Gider: -5/gün</span></button>
+      <button class="bopt" data-b="mill">💧 Su Değirmeni (1500)<span class="binfo">Nehir kıyısına · bölgedeki tarlalar +%25 ekmek</span></button>
       <button class="bopt" data-b="farm">🚜 Çiftlik (1000)<span class="binfo">Gider: -7/gün</span></button>
       <button class="bopt" data-b="choco">🍫 Çikolata Fb. (8000)<span class="binfo">Gider yok</span></button>
       <button class="bopt" data-b="fishery">🐟 Balıkçı Limanı (2000)<span class="binfo">Kıyıya · balık üretir</span></button>
