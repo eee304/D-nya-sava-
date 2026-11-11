@@ -167,12 +167,18 @@ function place(){
   camera.position.set(target.x + hx*dist, target.y + sp*dist, target.z + hz*dist);
   camera.lookAt(target);
 }
-function zoom(f){
+// zoom by factor f towards a point of the screen (ndc; the centre for the +/− buttons): the map point under the
+// cursor stays under the cursor, like zooming into a picture
+const _zPlane=new THREE.Plane(new THREE.Vector3(0,1,0), 0), _zRay=new THREE.Raycaster(), _zA=new THREE.Vector3(), _zB=new THREE.Vector3();
+function groundAt(nx, ny, out){ camera.updateMatrixWorld(); _zRay.setFromCamera(new THREE.Vector2(nx, ny), camera); return _zRay.ray.intersectPlane(_zPlane, out); }
+function zoom(f, nx=0, ny=0){
   if(view!=='world') return;
   worldTween=null;
+  const before=(nx||ny) && groundAt(nx, ny, _zA);
   dist=Math.min(DMAX,Math.max(DMIN,dist*f)); place();
-  // zooming in close over a country opens its region view
-  if(f<1 && dist<=ENTER_DIST && worldBuilt && !pickingHome){ const n=provAtScreen(0,0); if(n) enterRegion(n); }
+  if(before && groundAt(nx, ny, _zB)){ target.x=Math.min(700,Math.max(-700,target.x+_zA.x-_zB.x)); target.z=Math.min(460,Math.max(-460,target.z+_zA.z-_zB.z)); place(); }
+  // zooming in close over a country opens its region view (the one under the cursor)
+  if(f<1 && dist<=ENTER_DIST && worldBuilt && !pickingHome){ const n=provAtScreen(nx, ny) || provAtScreen(0,0); if(n) enterRegion(n); }
 }
 
 const keys={};
@@ -190,7 +196,9 @@ document.querySelectorAll('#pad .pb').forEach(b=>{
 });
 document.getElementById('zin').onclick=()=>zoom(.85);
 document.getElementById('zout').onclick=()=>zoom(1/.85);
-function wheel(e){ e.preventDefault(); if(view!=='world') return; zoom(e.deltaY<0?.9:1.1); }
+function wheel(e){ e.preventDefault(); if(view!=='world') return;
+  const r=renderer.domElement.getBoundingClientRect();
+  zoom(e.deltaY<0?.9:1.1, ((e.clientX-r.left)/r.width)*2-1, -((e.clientY-r.top)/r.height)*2+1); }
 renderer.domElement.addEventListener('wheel',wheel,{passive:false});
 
 document.getElementById('resetBtn').onclick=()=>{ target.set(0,0,0); dist=1080; yaw=0; pitch=1.0; place(); };
@@ -4772,6 +4780,7 @@ if (new URLSearchParams(location.search).has('test')) {
       handleP2P('pX', { k:'offer', id:'o1', give:'iron', gn:200, want:'money', wn:1500 }); handleP2P('pY', { k:'allyReq' });
       const before=S.money; document.getElementById('diploAct').click(); answerOffer(0, true); const after=S.money; answerOffer(0, true);
       const sent=sendOffer('pX', 'bread', 100, 'wood', 50); return { before, after, iron:S.iron, allies:[...alliances], sent, bread:S.bread, pending:Object.keys(pendingOut).length }; },
+    groundAt(nx, ny){ const v=groundAt(nx, ny, new THREE.Vector3()); return v && [v.x, v.z]; }, camState(){ return { dist, tx:target.x, tz:target.z }; },
     scar(id){ scarProvince(id, 'test'); refreshUpgradeUI(); }, repair(id){ repairProvince(id); }, walls(id){ return wallsLevel(id); },
     siege(id){ const b=bots[0]; S.sieges[id]={ bot:b.id, country:PI.byId[id].country, day:S.gameDays, until:S.gameDays+60, lvl:2 }; refreshSiegeVisuals(); },
     inv(){ return invasion ? { phase:invasion.phase, force:Math.round(invasion.force), supplied:invasion.supplied, why:invasion.supplyWhy, siegeT:invasion.siegeT, siegeDur:invasion.siegeDur, sieged:!!invasion.sieged, prov:invasion.prov } : null; },
@@ -4830,3 +4839,35 @@ if (new URLSearchParams(location.search).has('test')) {
       coast:!!regionView.info.coast, trees:regionView.treeCount, placed:regionView.placed }; },
   };
 }
+
+
+// ---- movable panels: drag a panel by any empty part of it (not its buttons or fields); it stays where it was left,
+// also after closing and reopening it and in later games (per browser)
+const DRAG_PANELS=['tradePanel','diploPanel','rankPanel','provPanel','ctxPanel','battlePanel','eventCard','opBar','buildpanel','taxbar','regionHud'];
+const NO_DRAG='button,input,select,textarea,a,label,summary,[contenteditable],.bopt,.rank-row,#dpInbox,#trOffers,#trGoods';
+function placePanel(el, x, y){
+  const w=el.offsetWidth||200, h=el.offsetHeight||60, W=window.innerWidth, H=window.innerHeight;
+  x=Math.max(4-w*.6, Math.min(W-w*.4, x)); y=Math.max(4, Math.min(H-40, y));   // keep a grip on screen
+  Object.assign(el.style, { left:x+'px', top:y+'px', right:'auto', bottom:'auto', transform:'none', margin:'0' });
+}
+for(const id of DRAG_PANELS){
+  const el=document.getElementById(id); if(!el) continue;
+  el.classList.add('movable');
+  try{ const p=JSON.parse(localStorage.getItem('mbr.panel.'+id)||'null'); if(p) placePanel(el, p.x, p.y); }catch(e){}
+  let drag=null;
+  el.addEventListener('pointerdown', e=>{
+    if(e.button!==0 || e.target.closest(NO_DRAG)) return;
+    // inside a scrolling list, only its scrollbar strip is left alone
+    const r=el.getBoundingClientRect(); if(el.scrollHeight>el.clientHeight && e.clientX>r.right-14) return;
+    drag={ dx:e.clientX-r.left, dy:e.clientY-r.top, id:e.pointerId, moved:false };
+    el.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  el.addEventListener('pointermove', e=>{ if(!drag || e.pointerId!==drag.id) return; drag.moved=true; el.classList.add('dragging'); placePanel(el, e.clientX-drag.dx, e.clientY-drag.dy); });
+  const end=e=>{ if(!drag) return; el.classList.remove('dragging');
+    if(drag.moved){ const r=el.getBoundingClientRect(); try{ localStorage.setItem('mbr.panel.'+id, JSON.stringify({ x:r.left, y:r.top })); }catch(err){} }
+    drag=null; };
+  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+  // double-click on an empty part: back to its usual place
+  el.addEventListener('dblclick', e=>{ if(e.target.closest(NO_DRAG)) return; for(const k of ['left','top','right','bottom','transform','margin']) el.style[k]=''; try{ localStorage.removeItem('mbr.panel.'+id); }catch(err){} });
+}
+window.addEventListener('resize', ()=>{ for(const id of DRAG_PANELS){ const el=document.getElementById(id); if(el && el.style.left) placePanel(el, parseFloat(el.style.left), parseFloat(el.style.top)); } });

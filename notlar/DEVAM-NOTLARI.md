@@ -188,6 +188,9 @@ Claude Code hafızası proje yoluna göre bir klasörde durur:
 3. **Göller:** `public/data/lakes.json` (863 göl; 211 baraj gölü yalnız 2014'te). Dünya haritasında boyalı; bölgede karadan oyulup su doluyor (Van, Tuz, Beyşehir…).
 4. **Mevsim geçişi kararmasız:** kar ve sonbahar yaprakları artık malzemelerin kendisinde (`region/season.js`): yukarı bakan her yüzey (zemin, çatı, ağaç tepesi) kar alır, yapraklı ağaçlar sonbaharda turuncu-sarı-kırmızıya döner; mevsim değişince birkaç saniyede yavaşça geçer, bölge yeniden kurulmaz. Kar miktarı enleme göre (güneyde yamalı, kuzeyde dolu).
 
+5. **İmlece doğru yakınlaşma:** dünya haritasında tekerlek imlecin altındaki noktaya yakınlaşır (o nokta imlecin altında kalır); sonuna kadar yakınlaşınca imlecin altındaki bölgeye girilir. Bölge görünümünde de aynı (`zoomToCursor`).
+6. **Taşınabilir paneller:** Ticaret, Diplomasi, Sıralama, il paneli, işgal paneli, savaş paneli, olay kartı, harekât çubuğu, inşa ve vergi panelleri ve bölge başlığı boş bir yerinden basılı tutup sürüklenerek taşınır. Kapatıp açınca ve sonraki oyunlarda aynı yerde açılır (tarayıcıda saklanır); panelin boş yerine çift tıklayınca eski yerine döner.
+
 ---
 
 ## 7. Test durumu (son çalıştırma)

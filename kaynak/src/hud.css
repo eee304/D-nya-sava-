@@ -478,3 +478,10 @@ body.cinematic #eventCard { display:none !important; }
 .me-btns { display:flex; gap:8px; } .me-btns button { padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:rgba(255,255,255,.08); color:inherit; cursor:pointer; }
 
 .lb-match { display:flex; gap:8px; align-items:center; font-size:13px; margin:8px 0 4px; opacity:.9; cursor:pointer; }
+
+/* movable panels */
+.movable { cursor: grab; touch-action: none; }
+.movable button, .movable input, .movable select, .movable a, .movable label, .movable .rank-row { cursor: pointer; }
+.movable input[type=number], .movable input[type=text] { cursor: text; }
+.movable.dragging { cursor: grabbing; user-select: none; box-shadow: 0 14px 34px rgba(0,0,0,.45) !important; opacity: .96; }
+#rankPanel.movable, #tradePanel.movable, #diploPanel.movable { touch-action: pan-y; }
