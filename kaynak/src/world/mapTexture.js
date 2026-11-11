@@ -31,7 +31,7 @@ function blob(lon, lat, list) {
   return [m, kind];
 }
 
-export function paintWorldTexture(projection, W, H, rivers = []) {
+export function paintWorldTexture(projection, W, H, rivers = [], lakes = []) {
   // ---- 1) low-res climate + relief field
   const LW = 1024, LH = Math.round(LW * H / W);
   const field = new Float32Array(LW * LH * 3), height = new Float32Array(LW * LH), forest = new Float32Array(LW * LH);
@@ -99,6 +99,12 @@ export function paintWorldTexture(projection, W, H, rivers = []) {
     for (const c of rv.c) { const q = projection(c); if (!q || !isFinite(q[0])) { on = false; continue; } const x = q[0] * HW / W, y = q[1] * HH / H; if (on) ctx.lineTo(x, y); else ctx.moveTo(x, y); on = true; }
     if (pass === 0) { ctx.strokeStyle = 'rgba(70,90,60,.35)'; ctx.lineWidth = w + 1.6; } else { ctx.strokeStyle = 'rgba(64,112,140,.85)'; ctx.lineWidth = w; }
     ctx.stroke();
+  }
+  // lakes, with a dark rim like the coasts
+  for (const lk of lakes) {
+    ctx.beginPath();
+    for (const r of lk.p) { r.forEach((c, i) => { const q = projection(c); if (!q) return; const x = q[0] * HW / W, y = q[1] * HH / H; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.closePath(); }
+    ctx.fillStyle = 'rgba(58,108,138,.95)'; ctx.fill('evenodd'); ctx.strokeStyle = 'rgba(40,60,50,.45)'; ctx.lineWidth = .9; ctx.stroke();
   }
   const im = ctx.getImageData(0, 0, HW, HH), d = im.data;
   for (let y = 0, o = 0; y < HH; y++) for (let x = 0; x < HW; x++, o += 4) {

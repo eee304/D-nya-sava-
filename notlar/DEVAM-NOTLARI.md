@@ -182,6 +182,12 @@ Claude Code hafızası proje yoluna göre bir klasörde durur:
 11. **Diplomasi (çok oyunculu):** alt çubukta "Diplomasi" (yalnız çok oyunculuda). Oyunculara para/ekmek/demir/balık/et/(odun | petrol, teknoloji) teklif et: verdiğin mal cevap gelene kadar emanette, reddedilirse geri gelir. İttifak teklif et/boz; müttefikler birbirine saldıramaz ve harekâtta birbirinin bölgelerinden ikmal alır. Mesajlar kurucu (host) üzerinden geçer; ittifak listesi dünya durumuyla herkese gider.
 12. **Kısa maç (40 dk):** dönem ekranında "Uzun oyun / Kısa maç" seçimi (çok oyunculuda lobide kurucunun kutusu). Rakipler oyuncunun çevresinde (yarıçap 100 birim) başlar, barış 3 ay. 15. dakikada güvenli bölge daralmaya başlar, 35. dakikada 30 birime iner (haritada sarı halka, dışı karartılı). Dışarıda kalan bölgelerde her ay askerin %25'i kaçar, öfke artar; botlar dışarıdaki ülkeleri kaybeder; dışarıya sefer yapılmaz. Süre dolunca ya da rakip kalmayınca en büyük imparatorluk (km²) kazanır.
 
+**11 Kasım:**
+1. **Yanık evler** %30 daha büyük, her birinde köz ateşi yanıyor ve uzaktan görünen kalın, koyu bir duman sütunu yükseliyor; çevresindeki kararmış toprak daha geniş.
+2. **Nehir verisi temizlendi:** `scripts/build-rivers.mjs` (Natural Earth 10m nehir + göl dosyalarından) aynı nehrin üst üste binen kopyalarını siler (büyük nehir önce yerleşir, ~3 km içindeki tekrarlar atılır), uç uca gelen parçaları tek çizgiye birleştirir (517 birleşme; kavşaklar ayrı kalır). Fırat bölgesinde üst üste binme 1183 noktada 1'e indi.
+3. **Göller:** `public/data/lakes.json` (863 göl; 211 baraj gölü yalnız 2014'te). Dünya haritasında boyalı; bölgede karadan oyulup su doluyor (Van, Tuz, Beyşehir…).
+4. **Mevsim geçişi kararmasız:** kar ve sonbahar yaprakları artık malzemelerin kendisinde (`region/season.js`): yukarı bakan her yüzey (zemin, çatı, ağaç tepesi) kar alır, yapraklı ağaçlar sonbaharda turuncu-sarı-kırmızıya döner; mevsim değişince birkaç saniyede yavaşça geçer, bölge yeniden kurulmaz. Kar miktarı enleme göre (güneyde yamalı, kuzeyde dolu).
+
 ---
 
 ## 7. Test durumu (son çalıştırma)
@@ -202,8 +208,6 @@ Hepsi geçti (30 Ekim, son kod):
 
 - (10 Kasım) Çok oyunculu diplomasi ve kısa maç çok oyunculuda iki gerçek tarayıcıyla denenmedi. Kısa maçta güvenli bölgenin merkezi, herkes ülkesini seçene kadar oyuncudan oyuncuya biraz farklı olabilir (ayda bir yeniden hesaplanır).
 - (10 Kasım) Döndürülmüş bölge görünümü kodda var ama mevcut il gruplarında hiçbir il %30 eşiğini geçmiyor (çapraz ince il yok); yalnız daha iyi merkez seçimi etkili. Gerçekten çok uzun iller için kare olmayan arazi gerekir.
-- (10 Kasım) Doğal Earth nehirlerinde aynı nehir ülke sınırında farklı adlarla parçalı (Fırat/Euphrates/Al Furat); yer yer iki çizgi üst üste gelip nehri genişletiyor. Göller yok.
-- (10 Kasım) Mevsim değişince bölge görünümü kısa bir kararmayla yeniden kuruluyor (inşa modu açıkken beklenir).
 
 - Gerçek bir tarayıcıda (gerçek GPU) FPS hiç ölçülmedi. "Yüksek" kalitede AO ağır olabilir; Otomatik mod yavaşsa kendini düşürüyor.
 - Gece yok: gün döngüsü bilerek sabah kızıllığı / akşam altını ile sınırlı. Pencere ışığı akşamüstü hafif.

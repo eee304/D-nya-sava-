@@ -18,6 +18,7 @@ import {
   watermill, ruin,
 } from './builders.js';
 import { setWindowGlow } from './textures.js';
+import { SEASON, seasonalizeScene, seasonTargets } from './season.js';
 import { RIGS } from './prefabs.js';
 
 const VIEW_H = 40;            // world units visible vertically at zoom 1
@@ -71,19 +72,6 @@ export class RegionView {
       B.trees = Object.fromEntries(Object.entries(B.trees).map(([k, w]) => [k, w * (1 - extra)]));
       for (const [k, w] of Object.entries(flora.trees)) B.trees[k] = (B.trees[k] || 0) + w;
     }
-    // the season: snow on the ground and on the trees in winter (more the further from the equator), autumn colours
-    const al = Math.abs(info.lat), cold = biomeKey === 'temperate' || biomeKey === 'steppe' || biomeKey === 'boreal';
-    if (info.season === 'winter' && cold && al >= 33) {
-      const k = Math.min(1, (al - 33) / 10);
-      B.snowy = Math.max(B.snowy || 0, .45 + .5 * k); B.snowAt = Math.min(B.snowAt, 6);
-      B.grass = B.grass.map(c => mixHex(c, '#c9d0cb', .25 + .35 * k)); B.dry = mixHex(B.dry, '#cfd3cc', .4); B.floor = mixHex(B.floor, '#aeb7b2', .35 + .3 * k);
-      B.leaf = B.leaf.map((c, i) => mixHex(c, i % 2 ? '#e9eeec' : '#d2dbd7', .45 + .35 * k));
-      B.pine = ['#2f5530', '#2a4a2b', '#355f35', '#24442a'].map((c, i) => mixHex(c, '#e4ebe8', i % 2 ? .3 + .25 * k : .15 + .2 * k));
-      info.winter = k;
-    } else if (info.season === 'autumn' && cold && al >= 30) {
-      B.leaf = ['#c4782e', '#d9a03a', '#a8452a', '#8a6a2a', '#6f7a30', '#e0b84a', '#b95f2a'];
-      B.grass = B.grass.map(c => mixHex(c, '#a69a50', .25)); info.autumn = 1;
-    } else if (info.season === 'spring' && cold) B.grass = B.grass.map(c => mixHex(c, '#6fb03f', .18));
     const culture = cultureFor(info.lon, info.lat), era = info.era;
     info.biome = biomeKey; info.biomeLabel = B.label; info.culture = culture;
     const scene = this.scene = new THREE.Scene();
@@ -127,7 +115,7 @@ export class RegionView {
     for (const b of info.buildings) if (b.type === 'field') T.FIELDS.push([b.x, b.z, 6, 5, -roadAngle(b.x, b.z)]);
 
     const K = new Kit(), patches = []; K.hi = true;
-    this.flags = []; this.blades = []; this.wheels = []; this.ruinSmoke = []; this._ruinsLeft = 0; this.ships = []; this.docks = []; this.basePos = null; this.forms = []; this.battle = null;
+    this.flags = []; this.blades = []; this.wheels = []; this.ruinSmoke = []; this.ruinPos = []; this._ruinsLeft = 0; this.ships = []; this.docks = []; this.basePos = null; this.forms = []; this.battle = null;
     this.pumps = []; this.boats = []; this.chimneys = []; this.herds = [];
     const ownerTex = flagTexture(info.ownerColor, info.isPlayer);
 
@@ -146,8 +134,8 @@ export class RegionView {
         if (!freeSpot(x, z, 1.1 * s)) continue;
         const ry = roadAngle(x, z) + (rng() < .5 ? 0 : Math.PI / 2) + (rng() - .5) * .12;
         if (this._ruinsLeft > 0) {   // war damage: this house burnt down
-          this._ruinsLeft--; const fr = ruin(K, x, T.H(x, z), z, ry, s, rng);
-          obstacles.push([x, z, fr]); patches.push([x, z, fr * 2.2, .85, 'scorch']); this.ruinSmoke.push([x, T.H(x, z) + .6, z]); placed++; continue;
+          this._ruinsLeft--; const fr = ruin(K, x, T.H(x, z), z, ry, Math.max(s, 1) * 1.3, rng);
+          obstacles.push([x, z, fr]); patches.push([x, z, fr * 2.6, .9, 'scorch']); this.ruinSmoke.push([x, T.H(x, z) + .6, z]); this.ruinPos.push([x, T.H(x, z) + .6, z]); placed++; continue;
         }
         const fr = house(K, x, T.H(x, z), z, ry, s, culture, era, rng, rural);
         obstacles.push([x, z, fr]); patches.push([x, z, fr * 1.5, .4]); placed++;
@@ -263,6 +251,11 @@ export class RegionView {
     }
 
     this.fx = new FX(scene, 1, 260);
+    // burnt houses still smoulder: embers glow in each ruin
+    for (const [x, y, z] of this.ruinPos) this.fx.fire(x, y - .35, z, .42);
+    // seasons are drawn by the materials (snow, autumn leaves): set them for the season we arrive in, no easing
+    water.userData.noSeason = true; seasonalizeScene(scene);
+    this.setSeason(info.season, true);
     // soldiers drilling next to the player's barracks (roughly one figure per 400 men)
     if (this.basePos && info.army > 0) {
       const [bx, bz, br] = this.basePos, n = Math.max(6, Math.min(42, Math.round(info.army / 400)));
@@ -922,9 +915,16 @@ export class RegionView {
     this.updateScene(dt);
   }
 
+  // the season of this place: snow and autumn colours ease in over a few seconds (immediate when the view is built)
+  setSeason(season, now = false) {
+    if (!this.info) return;
+    this.info.season = season; this._seasonT = seasonTargets(season, this.info.lat, this.info.biome);
+    if (now) { SEASON.uSnow.value = this._seasonT.snow; SEASON.uAutumn.value = this._seasonT.autumn; }
+  }
   // everything that moves on its own (water, flags, mills, ships, armies, smoke)
   updateScene(dt) {
     const t = this.t;
+    if (this._seasonT) { const k = Math.min(1, dt * .35); SEASON.uSnow.value += (this._seasonT.snow - SEASON.uSnow.value) * k; SEASON.uAutumn.value += (this._seasonT.autumn - SEASON.uAutumn.value) * k; }
     windTick(t);
     if (this.life) { this.life.group.visible = !this.battle; if (!this.battle) this.life.update(dt, t); }
     if (this._follow) { const d = this._follow.g.position.clone().sub(this.controls.target); d.y = 0; this.controls.target.add(d); this.cam.position.add(d); }   // test close-ups: track a vehicle
@@ -976,7 +976,8 @@ export class RegionView {
       const c = this.hearths[Math.floor(Math.random() * hn)]; this.fx.puff(c.x, c.y, c.z, .45, 4.5, '#cfcac2', .35);
     }
     // burnt houses still smoulder
-    if (this.fx && this.ruinSmoke.length && Math.random() < dt * 1.6) { const c = this.ruinSmoke[Math.floor(Math.random() * this.ruinSmoke.length)]; this.fx.puff(c[0] + (Math.random() - .5) * .6, c[1], c[2] + (Math.random() - .5) * .6, .7, 5, '#3d3a37', .55); }
+    if (this.fx && this.ruinSmoke.length && Math.random() < dt * 2.2 * Math.min(3, this.ruinSmoke.length)) { const c = this.ruinSmoke[Math.floor(Math.random() * this.ruinSmoke.length)];
+      this.fx.puff(c[0] + (Math.random() - .5) * .6, c[1], c[2] + (Math.random() - .5) * .6, 1.5 + Math.random() * .8, 9, Math.random() < .5 ? '#2f2b28' : '#4a4541', 1.1); }   // a tall smoke column, seen from far
     if (this.fx && this.chimneys.length && Math.random() < dt * 2.5) { const c = this.chimneys[Math.floor(Math.random() * this.chimneys.length)]; this.fx.puff(c[0], c[1], c[2], 1.1, 4, '#9a9a9a', .6); }
     // animals graze: each wanders to a new spot inside its pasture, stops, lowers its head, moves on
     const ho = this._ho || (this._ho = new THREE.Object3D());

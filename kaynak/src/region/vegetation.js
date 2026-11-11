@@ -141,6 +141,7 @@ export function addVegetation(scene, T, B, rng, canPlace, blocked = null) {
       const pal = LEAF[kind] || (kind === 'pine' ? (B.pine || ['#2f5530', '#2a4a2b', '#355f35', '#24442a']) : B.leaf);
       crown.setColorAt(i, col.set(pal[Math.floor(t.c * pal.length)]).multiplyScalar(.85 + t.ck * .3));
     });
+    if (!LEAF[kind] && kind !== 'pine' && kind !== 'palm' && kind !== 'jungle') crown.userData.leaf = true;   // broadleaf crowns turn in autumn
     for (const m of [crown, trunk]) if (m) { m.castShadow = true; m.receiveShadow = true; scene.add(m); meshes.push(m); }
   }
   // forest floor (as in the low-poly landscape reference): fallen logs and little clusters of mushrooms beside the trees

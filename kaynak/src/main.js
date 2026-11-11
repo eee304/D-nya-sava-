@@ -947,7 +947,8 @@ function loop(){
     S.gameDays += dt;
     updateCalendar();
     if(Math.floor(S.gameDays)!==prevDay){ applySeasonMap(); updateMatchHud();
-      if(view==='region' && regionView && regionView.info && !buildType && !regionView.jobs?.length && seasonAtLat(regionView.info.lat)!==regionView.info.season) rebuildRegionHere(SEASON_ICON[seasonAtLat(regionView.info.lat)]+' '+SEASON_TR[seasonAtLat(regionView.info.lat)]+' geldi'); }
+      // a new season in the close-up: snow or autumn leaves come in gradually, the view is not rebuilt
+      if(view==='region' && regionView && regionView.info && seasonAtLat(regionView.info.lat)!==regionView.info.season){ const se=seasonAtLat(regionView.info.lat); regionView.setSeason(se); toast(SEASON_ICON[se]+' '+SEASON_TR[se]+' geldi'); } }
     // charge building upkeep once for each in-game day that elapsed
     const newDay=Math.floor(S.gameDays);
     for(let d=prevDay; d<newDay; d++) chargeDailyUpkeep();
@@ -1152,7 +1153,7 @@ function buildWorld(features){
   features.forEach(f=>{ const n=f.properties&&f.properties.name; if(n) featByName[n]=f; });
   if(landTex) landTex.dispose();
   const _t0=performance.now();
-  RIVERS_XZ=null; landTex=new THREE.CanvasTexture(paintWorldTexture(projection, W, H, RIVERS||[]));
+  RIVERS_XZ=null; LAKES_XZ=null; landTex=new THREE.CanvasTexture(paintWorldTexture(projection, W, H, RIVERS||[], eraLakes()));
   timings.mapTexture=Math.round(performance.now()-_t0);
   landTex.colorSpace=THREE.SRGBColorSpace; landTex.anisotropy=renderer.capabilities.getMaxAnisotropy();
   landTex.repeat.set(1/W, 1/H); landTex.offset.set(.5, .5);   // extrude cap UVs are shape coords
@@ -1273,6 +1274,7 @@ function loadEra(era){
   const done=async (features)=>{
     try{ REGIONS = await load(import.meta.env.BASE_URL+'data/regions-'+era+'.json'); }catch(e){ REGIONS = {}; }
     if(!RIVERS){ try{ RIVERS = await load(import.meta.env.BASE_URL+'data/rivers.json'); }catch(e){ RIVERS = []; } }
+    if(!LAKES){ try{ LAKES = await load(import.meta.env.BASE_URL+'data/lakes.json'); }catch(e){ LAKES = []; } }
     features = normFeatures(features, era);
     buildWorld(features);
     loadingEl.style.display='none';
@@ -1326,6 +1328,17 @@ document.querySelectorAll('.bopt').forEach(b=>{
 let LANDFEATS = null;
 // real rivers (Natural Earth 1:10m centrelines, simplified): [{ n:name, r:scalerank 0..9 (0 = biggest), c:[[lon,lat],...] }]
 let RIVERS = null, RIVERS_XZ = null;
+// real lakes (Natural Earth 1:10m): [{ n, r, res: 1 = reservoir (2014 only), p:[outer ring, island rings...] }]
+let LAKES = null, LAKES_XZ = null;
+const eraLakes=()=>(LAKES||[]).filter(l=>!l.res || S.currentEra!=='1810');
+function lakesXZ(){
+  if(LAKES_XZ || !LAKES) return LAKES_XZ || [];
+  LAKES_XZ = [];
+  for(const l of eraLakes()){ const rings=l.p.map(r=>r.map(c=>sceneXZ(c[0], c[1])).filter(Boolean)).filter(r=>r.length>=3); if(!rings.length) continue;
+    let a=1e9,b=-1e9,cc=1e9,d=-1e9; for(const [x,z] of rings[0]){ a=Math.min(a,x); b=Math.max(b,x); cc=Math.min(cc,z); d=Math.max(d,z); }
+    LAKES_XZ.push({ n:l.n, rings, bb:[a,b,cc,d] }); }
+  return LAKES_XZ;
+}
 function riversXZ(){
   if(RIVERS_XZ || !RIVERS) return RIVERS_XZ || [];
   RIVERS_XZ = [];
@@ -4156,7 +4169,11 @@ function regionGeo(p, f){
       else if(run.length){ run.push(q); flush(); }
       prev=q; }
     flush(); }
-  return { land, rivers, prov: p.ringsXZ.map(r=>r.map(([x,z])=>T(x, z))) };
+  // lakes in the view are cut out of the land: they fill with water like the sea
+  const lakes=[];
+  for(const lk of lakesXZ()){ const bb=lk.bb; if(bb[1]<center[0]-R || bb[0]>center[0]+R || bb[3]<center[1]-R || bb[2]>center[1]+R) continue;
+    lakes.push(lk.rings.map(r=>r.map(([x,z])=>T(x, z)))); }
+  return { land, rivers, lakes, prov: p.ringsXZ.map(r=>r.map(([x,z])=>T(x, z))) };
 }
 // everything the region generator needs to know about a country, as plain data
 // everything the region generator needs to know about one province, as plain data
@@ -4241,9 +4258,9 @@ async function enterRegion(name){
   try{
     getRegionView();
     regionView.battleSource = regionBattleState;
-    const sig = name + '|' + info.era + '|' + info.season + '|' + (info.scars? info.scars.ruins : 0) + '|' + info.ownerColor + '|' + info.settle + '|' + info.cleared.length + '|' + info.dug.length + '|' + info.shipsAt.length + '|' + info.buildings.map(b => b.type + b.x.toFixed(1)).join(',')
+    const sig = name + '|' + info.era + '|' + (info.scars? info.scars.ruins : 0) + '|' + info.ownerColor + '|' + info.settle + '|' + info.cleared.length + '|' + info.dug.length + '|' + info.shipsAt.length + '|' + info.buildings.map(b => b.type + b.x.toFixed(1)).join(',')
       + '|' + Math.round(info.army/400) + '|' + (regionBattleState(name) ? 'battle' : '');
-    if(sig !== regionSig || !regionView.scene){ regionView.build(info); regionSig = sig; }
+    if(sig !== regionSig || !regionView.scene){ regionView.build(info); regionSig = sig; } else regionView.setSeason(info.season, true);
     regionView.setLighting(currentSky());
   }catch(e){
     console.error(e); fadeView(false); _viewBusy = false; hintEl.textContent = 'Bölge oluşturulamadı: ' + e.message; return;

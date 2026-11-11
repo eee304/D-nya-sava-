@@ -5,21 +5,24 @@
 // geo: { land: [[[x,z],...], ...], prov: [[[x,z],...], ...] } in region coordinates
 export function buildMasks(geo, ext, res = 512) {
   const cell = 2 * ext / res;
-  const raster = rings => {
+  const path = (ctx, r) => r.forEach(([x, z], i) => { const px = (x + ext) / cell, pz = (z + ext) / cell; if (i) ctx.lineTo(px, pz); else ctx.moveTo(px, pz); });
+  const raster = (rings, holes = []) => {
     const cv = document.createElement('canvas'); cv.width = cv.height = res;
     const ctx = cv.getContext('2d', { willReadFrequently: true });
     ctx.fillStyle = '#fff';
     for (const r of rings) {
       if (!r || r.length < 3) continue;
-      ctx.beginPath();
-      r.forEach(([x, z], i) => { const px = (x + ext) / cell, pz = (z + ext) / cell; if (i) ctx.lineTo(px, pz); else ctx.moveTo(px, pz); });
-      ctx.closePath(); ctx.fill();
+      ctx.beginPath(); path(ctx, r); ctx.closePath(); ctx.fill();
     }
+    // lakes are cut out (their islands are holes in the lake, so they stay land: even-odd fill)
+    ctx.globalCompositeOperation = 'destination-out';
+    for (const lake of holes) { ctx.beginPath(); for (const r of lake) { if (r.length < 3) continue; path(ctx, r); ctx.closePath(); } ctx.fill('evenodd'); }
+    ctx.globalCompositeOperation = 'source-over';
     const a = ctx.getImageData(0, 0, res, res).data, m = new Uint8Array(res * res);
     for (let i = 0; i < m.length; i++) m[i] = a[i * 4 + 3] > 127 ? 1 : 0;
     return m;
   };
-  const land = sdf(raster(geo.land), res, cell), prov = sdf(raster(geo.prov), res, cell);
+  const land = sdf(raster(geo.land, geo.lakes || []), res, cell), prov = sdf(raster(geo.prov), res, cell);
   const sample = (G, x, z) => {
     const fx = Math.max(0, Math.min(res - 1.001, (x + ext) / cell - .5)), fz = Math.max(0, Math.min(res - 1.001, (z + ext) / cell - .5));
     const ix = fx | 0, iz = fz | 0, tx = fx - ix, tz = fz - iz, i = iz * res + ix;
