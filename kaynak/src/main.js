@@ -330,7 +330,7 @@ function setHoverCountry(name){
     hoverMeshes.forEach(m=>{ if(m.material && m.material.emissive){ m.material.emissive.setHex(0x3a4a2a); } });
     const f=featByName[name];
     let km2='—';
-    try{ if(f){ const st=d3geo.geoArea(f); km2=Math.round(st*EARTH_KM2_PER_STER).toLocaleString('tr-TR')+' km²'; } }catch(e){}
+    try{ if(f){ const st=sphereArea(f.properties.name); km2=Math.round(st*EARTH_KM2_PER_STER).toLocaleString('tr-TR')+' km²'; } }catch(e){}
     const ruler = (f&&f.properties&&(f.properties.ruler||f.properties.RULER||f.properties.leader||f.properties.SOVEREIGN)) || null;
     let iso=ISO2[name];
     if(!iso && f && f.properties){
@@ -1132,14 +1132,56 @@ function splitOttomanMed(reg){
   if(south.length && north.length) out.push({ n:'Şam', p:south });
   return out;
 }
+// 1810: the provinces come from today's admin regions, but an 1815 state rarely has today's borders. The Russian Empire
+// got only today's Russia (Finland, the Baltics, Poland, Belarus, Ukraine, the Caucasus, Alaska were left blank) and
+// Denmark only Greenland (Denmark itself and Iceland were blank). So: regions are clipped to the state's 1815 outline,
+// and any of its land no region covers becomes provinces named after the modern country lying there.
+let MODERN=null;   // today's countries, [{ name, polys, bb }] in map space (1810 only, for naming the leftover land)
+const MODERN_TR={ Finland:'Finlandiya', Estonia:'Estonya', Latvia:'Letonya', Lithuania:'Litvanya', Belarus:'Beyaz Rusya', Ukraine:'Ukrayna', Moldova:'Besarabya',
+  Poland:'Polonya', Georgia:'Gürcistan', Azerbaijan:'Azerbaycan', Armenia:'Ermenistan', Kazakhstan:'Kazak bozkırı', Iceland:'İzlanda', Denmark:'Danimarka',
+  'Faeroe Is.':'Faroe Adaları', Norway:'Norveç', Sweden:'İsveç', Germany:'Almanya', Russia:'Rusya', Turkey:'Anadolu', Romania:'Eflak-Boğdan', Greece:'Yunanistan',
+  Bulgaria:'Bulgaristan', Serbia:'Sırbistan', Iran:'İran', Iraq:'Irak', Syria:'Suriye', China:'Çin', Mongolia:'Moğolistan', Uzbekistan:'Özbekistan', Turkmenistan:'Türkmenistan',
+  'United States of America':'Amerika', Canada:'Kanada', Mexico:'Meksika', Brazil:'Brezilya', India:'Hindistan', Egypt:'Mısır', Libya:'Libya', Algeria:'Cezayir' };
+function modernName(cname, m){ if(cname==='Russian Empire' && m==='United States of America') return 'Rus Amerikası'; return MODERN_TR[m] || m; }
+const ringsArea=polys=>polys.reduce((t,p)=>t+Math.abs(area(p[0]||[])), 0);
+// outer rings only, snapped to a 0.01 grid without repeated points: polygon-clipping chokes on the raw shapes
+const cleanPolys=polys=>polys.map(p=>{ const r=[]; for(const [x,y] of simplifyRingB(p[0]||[])){ const q=[Math.round(x*100)/100, Math.round(y*100)/100]; const l=r[r.length-1]; if(!l || l[0]!==q[0] || l[1]!==q[1]) r.push(q); }
+  if(r.length>2 && (r[0][0]!==r[r.length-1][0] || r[0][1]!==r[r.length-1][1])) r.push(r[0].slice()); return [r]; }).filter(p=>p[0].length>3);
+const bbOf=polys=>{ const bb=[1e9,1e9,-1e9,-1e9]; for(const p of polys) for(const [x,y] of p[0]){ bb[0]=Math.min(bb[0],x); bb[1]=Math.min(bb[1],y); bb[2]=Math.max(bb[2],x); bb[3]=Math.max(bb[3],y); } return bb; };
+function fitRegions(cname, list, cpolys){
+  const total=ringsArea(cpolys); if(!total || !MODERN || !MODERN.length) return list;
+  const raw=list.reduce((t,r)=>t+ringsArea(r.polys), 0);
+  if(raw>total*.97 && raw<total*1.05) return list;   // already a good fit: nothing to do (keeps the load fast)
+  // is a point already inside one of the regions?
+  const regs=list.flatMap(r=>r.polys.map(p=>{ const ring=p[0]; return { ring, bb:bbOf([p]) }; }));
+  const covered=(x,y)=>regs.some(o=>x>=o.bb[0] && x<=o.bb[2] && y>=o.bb[1] && y<=o.bb[3] && pointInRing(x, y, o.ring));
+  const C=cleanPolys(cpolys), cb=bbOf(C), out=list.slice(), names={};
+  for(const m of MODERN){
+    if(m.bb[2]<cb[0] || m.bb[0]>cb[2] || m.bb[3]<cb[1] || m.bb[1]>cb[3]) continue;
+    let part; try{ part=polygonClipping.intersection(C, m.clean || (m.clean=cleanPolys(m.polys))); }catch(e){ continue; }
+    const a=ringsArea(part); if(a<Math.max(Math.min(total*.004, 6), .3)) continue;   // (small Baltic and Caucasus lands count too)
+    // sample the piece: if most of it already belongs to a region, it is not missing
+    const pb=bbOf(part); let n=0, inReg=0;
+    for(let k=0; k<400 && n<60; k++){ const x=pb[0]+Math.random()*(pb[2]-pb[0]), y=pb[1]+Math.random()*(pb[3]-pb[1]); if(!part.some(p=>pointInRing(x, y, p[0]))) continue; n++; if(covered(x, y)) inReg++; }
+    if(!n || inReg>n*.5) continue;
+    let label=modernName(cname, m.name); names[label]=(names[label]||0)+1; if(names[label]>1) label+=' '+names[label];
+    out.push({ label, polys:part });
+  }
+  return out;
+}
 // subdivide one country polygon into area-proportional clipped cells
 // every country is split into provinces; each province piece is its own mesh (userData.prov)
-function buildCountry(f, color, idx){
+// group: every shape with this name (the 1815 map draws some states in several features — the Russian Empire, Prussia):
+// the country is built once, from all of them, so its provinces are not doubled
+function buildCountry(f, color, idx, group){
   const cname=f.properties && f.properties.name;
+  const cpolys=(group||[f]).flatMap(g=>countryPolys(g));
   let reg=REGIONS[cname] || (cname==='Türkiye' && REGIONS.Turkey);
   if(reg && cname==='Ottoman Empire' && S.currentEra==='1810') reg=splitOttomanMed(reg);
-  const provs=(reg && reg.length>1 && provincesFromRegions(cname, reg.map(r=>({ label:r.n, polys:countryPolys({ geometry:{ type:'MultiPolygon', coordinates:r.p } }) })), capitalXZ(cname)))
-    || splitCountry(cname, countryPolys(f), capitalXZ(cname));
+  let list = reg && reg.length>1 ? reg.map(r=>({ label:r.n, polys:countryPolys({ geometry:{ type:'MultiPolygon', coordinates:r.p } }) })) : null;
+  if(list && S.currentEra==='1810'){ const t0=performance.now(); list=fitRegions(cname, list, cpolys); const dt=performance.now()-t0; if(dt>60 && location.search.includes('test')) console.log('fitRegions slow', cname, Math.round(dt)); }
+  const provs=(list && list.length>1 && provincesFromRegions(cname, list, capitalXZ(cname)))
+    || splitCountry(cname, cpolys, capitalXZ(cname));
   for(const p of provs){
     PROVS.push(p);
     for(const ring of p.rings) regionMesh([ringToShape(ring)], color, idx, cname, ring.map(q=>[q[0],q[1]]), p.id);
@@ -1167,7 +1209,10 @@ function buildWorld(features){
   landTex.repeat.set(1/W, 1/H); landTex.offset.set(.5, .5);   // extrude cap UVs are shape coords
   if(!landDetail) landDetail=detailTexture();
   { const _t=performance.now();
-  features.forEach((f,idx)=>{ buildCountry(f, '#ffffff', idx); });
+  if(MODERN && MODERN.length && !MODERN[0].polys) MODERN=MODERN.map(f=>{ const polys=countryPolys(f); let bb=[1e9,1e9,-1e9,-1e9]; for(const p of polys) for(const [x,y] of p[0]){ bb[0]=Math.min(bb[0],x); bb[1]=Math.min(bb[1],y); bb[2]=Math.max(bb[2],x); bb[3]=Math.max(bb[3],y); } return { name:f.properties.name, polys, bb }; }).filter(m=>m.polys.length);
+  { const groups=featGroups=new Map(); for(const f of features){ const n=f.properties.name; if(!groups.has(n)) groups.set(n, []); groups.get(n).push(f); }
+    // (a state drawn in several shapes is built once from all of them; the other shapes only keep their index)
+    features.forEach((f,idx)=>{ const g=groups.get(f.properties.name); if(g[0]===f) buildCountry(f, '#ffffff', idx, g); }); }
   timings.countries=Math.round(performance.now()-_t); }
   // remove wide+thin strip artifacts ONLY if they hug the extreme north edge
   const box=new THREE.Box3(); const toRemove=[]; const TOPZ=H/2-12;
@@ -1281,6 +1326,7 @@ function loadEra(era){
   loadingEl.innerHTML = (era==='1810'?'1810 haritası yükleniyor…':'2014 haritası yükleniyor…');
   const done=async (features)=>{
     try{ REGIONS = await load(import.meta.env.BASE_URL+'data/regions-'+era+'.json'); }catch(e){ REGIONS = {}; }
+    if(era==='1810' && !MODERN){ try{ const topo=await load(import.meta.env.BASE_URL+'data/countries-50m.json'); MODERN=feature(topo, topo.objects.countries).features; }catch(e){ MODERN=[]; } }
     if(!RIVERS){ try{ RIVERS = await load(import.meta.env.BASE_URL+'data/rivers.json'); }catch(e){ RIVERS = []; } }
     if(!LAKES){ try{ LAKES = await load(import.meta.env.BASE_URL+'data/lakes.json'); }catch(e){ LAKES = []; } }
     features = normFeatures(features, era);
@@ -1360,6 +1406,16 @@ let ALL_FEATURES = null;   // full feature list for the country picker
 // is (x,z) over land?
 // per-feature lon/lat bounding boxes, computed once, to prune geoContains calls
 let FEAT_BBOX=null;
+// area on the sphere (steradians) that also works for the 1815 shapes wound the wrong way round (those measure as the
+// whole world minus the country) and for states drawn in several shapes
+let featGroups=new Map();
+function sphereArea(name){
+  let st=0;
+  for(const f of featGroups.get(name) || [featByName[name]].filter(Boolean)){ const g=f.geometry; if(!g) continue;
+    for(const poly of g.type==='Polygon'? [g.coordinates] : g.type==='MultiPolygon'? g.coordinates : []){
+      let a=0; try{ a=d3geo.geoArea({ type:'Polygon', coordinates:poly }); }catch(e){} st+=Math.min(a, 4*Math.PI-a); } }
+  return st;
+}
 function rewindFeature(f){
   const flip=poly=>poly.map(r=>r.slice().reverse()), g=f.geometry;
   const coords = g.type==='Polygon' ? flip(g.coordinates) : g.coordinates.map(p=>{ const q=flip(p); return d3geo.geoArea({type:'Polygon', coordinates:p})>2*Math.PI ? q : p; });
@@ -2568,7 +2624,7 @@ function botConquer(bot, name){
 // ---- ranking panel (by economy; shows flag, pop, size, army) ----
 let rankOpen=false;
 function empireArea(names){
-  let st=0; for(const n of names){ const f=featByName[n]; if(f){ try{ st+=d3geo.geoArea(f); }catch(e){} } }
+  let st=0; for(const n of names) st+=sphereArea(n);
   return Math.round(st*EARTH_KM2_PER_STER);
 }
 function renderRanking(){

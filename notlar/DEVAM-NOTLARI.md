@@ -191,6 +191,11 @@ Claude Code hafızası proje yoluna göre bir klasörde durur:
 5. **İmlece doğru yakınlaşma:** dünya haritasında tekerlek imlecin altındaki noktaya yakınlaşır (o nokta imlecin altında kalır); sonuna kadar yakınlaşınca imlecin altındaki bölgeye girilir. Bölge görünümünde de aynı (`zoomToCursor`).
 6. **Taşınabilir paneller:** Ticaret, Diplomasi, Sıralama, il paneli, işgal paneli, savaş paneli, olay kartı, harekât çubuğu, inşa ve vergi panelleri ve bölge başlığı boş bir yerinden basılı tutup sürüklenerek taşınır. Kapatıp açınca ve sonraki oyunlarda aynı yerde açılır (tarayıcıda saklanır); panelin boş yerine çift tıklayınca eski yerine döner.
 
+**12 Kasım — 1810 haritası:**
+1. **Rusya, Danimarka, İzlanda:** 1810 illeri bugünün idari bölgelerinden geliyor; Rus İmparatorluğu yalnız bugünkü Rusya'nın bölgelerini, Danimarka yalnız Grönland'ın belediyelerini almıştı (1815 verisinde bu iki ülkenin şekli ters sarılı olduğu için `build-regions.mjs` diğer bölgeleri onlara atayamamış). Artık açılışta (`fitRegions`) bir 1815 devletinin hiçbir ile düşmeyen toprağı, altındaki bugünkü ülkeye göre yeni il oluyor (`public/data/countries-50m.json` ile): Rus İmparatorluğu'na Finlandiya, Estonya, Letonya, Litvanya, Beyaz Rusya, Ukrayna, Polonya, Gürcistan, Kazak bozkırı ve Rus Amerikası (Alaska); Danimarka'ya Danimarka (Kopenhag başkent) ve İzlanda eklendi. Türkçe adlar `MODERN_TR` tablosunda.
+2. Birden çok parçayla çizilmiş devletler (Rus İmparatorluğu iki parça, Prusya beş parça) artık bir kez, bütün parçalarından kuruluyor; illeri ikilenmiyor.
+3. Ters sarılı şekillerin yüzölçümü düzeltildi (Rusya "3 milyar km²" görünüyordu) — `sphereArea`.
+
 ---
 
 ## 7. Test durumu (son çalıştırma)
