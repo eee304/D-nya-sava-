@@ -1,0 +1,10 @@
+{
+  "name": "Map Battle Royale",
+  "short_name": "Map Battle",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#06101c",
+  "theme_color": "#0b1626"
+}

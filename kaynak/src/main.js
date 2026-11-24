@@ -38,6 +38,11 @@ import { shipGeo, UNIT_MAT } from './units/models.js';
 import { genColors, area, pointInRing, ringToShape, simplifyRingB } from './world/geo.js';
 
 const wrap = document.getElementById('wrap');
+// finger input (phones, tablets): the map is dragged with one finger and pinched/turned with two; see "touch" below
+const IS_TOUCH = matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints>0 && !matchMedia('(pointer: fine)').matches);
+if(IS_TOUCH) document.body.classList.add('touch');
+// a phone's screen has 3x pixels: 1.5x looks the same at arm's length and keeps the frame rate and the battery
+const maxDPR=()=>Math.min(IS_TOUCH ? 1.5 : 2, window.devicePixelRatio||1);
 const loadingEl = document.getElementById('loading');
 
 function fail(msg){ loadingEl.style.display='flex'; loadingEl.innerHTML = msg; }
@@ -56,7 +61,7 @@ const camera = new THREE.PerspectiveCamera(45, 1, 1, 8000);
 let renderer;
 try { renderer = new THREE.WebGLRenderer({ antialias:true }); }
 catch(e){ fail('Bu tarayıcı 3B (WebGL) desteklemiyor.'); throw e; }
-renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+renderer.setPixelRatio(maxDPR());
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -70,7 +75,7 @@ let gfxPref = (()=>{ const q=new URLSearchParams(location.search).get('gfx'); if
 // software GPUs (no graphics card driver) cannot afford the screen effects: 'auto' starts them on low
 const softwareGPU=(()=>{ try{ const gl=renderer.getContext(), ext=gl.getExtension('WEBGL_debug_renderer_info');
   return /swiftshader|llvmpipe|software|basic render/i.test(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : ''); }catch(e){ return false; } })();
-const autoStart=()=>softwareGPU ? 'low' : 'high';
+const autoStart=()=>softwareGPU ? 'low' : IS_TOUCH ? 'medium' : 'high';   // phones start one step lower (heat, battery)
 post.setQuality(gfxPref==='auto' ? autoStart() : gfxPref);
 const skyEnv = skyEnvironment(renderer);
 camera.userData.aoRadius = 3.5;
@@ -235,7 +240,7 @@ renderer.domElement.addEventListener('pointerup',e=>{
   if(view!=='world') return;
   if(e.button!==0||!down) return;
   const moved=Math.hypot(e.clientX-down.x,e.clientY-down.y); down=null;
-  if(moved>10) return;
+  if(moved>(e.pointerType==='touch'? 14 : 10) || (e.pointerType==='touch' && touchNoTap)) return;
   const r=renderer.domElement.getBoundingClientRect();
   ptr.x=((e.clientX-r.left)/r.width)*2-1; ptr.y=-((e.clientY-r.top)/r.height)*2+1;
   ray.setFromCamera(ptr,camera);
@@ -287,23 +292,73 @@ renderer.domElement.addEventListener('pointerup',e=>{
   // picking your home country by clicking on the map
   if(pickingHome){
     const nm=hit.object.userData.country;
-    if(nm && featByName[nm]){ pickingHome=false; chooseCountry(featByName[nm], nm); }
+    if(nm && featByName[nm]){
+      if(e.pointerType==='touch' && touchPick!==nm){ touchPick=nm; hoverProvId=null; setHoverCountry(nm); return; }   // (no hover on a phone)
+      touchPick=null; pickingHome=false; chooseCountry(featByName[nm], nm); }
     return;
   }
   // clicking a country: if it's not ours, offer to invade
   const cname = hit.object.userData.country, pid = hit.object.userData.prov;
   if(movePick){ finishMovePick(pid); return; }
+  if(e.pointerType==='touch' && cname){ hoverProvId=pid||null; setHoverCountry(cname); }
   if(pid && ownsProv(pid)){ hideInvade(); showProvince(pid); }
   else if(cname){ hideProvince(); showInvade(cname, pid); }
   else { hideInvade(); hideProvince(); }
 });
+
+// ---- touch: one finger drags the map (the spot under the finger stays under it), two fingers pinch to zoom
+// towards their middle, twist to turn the map and move up/down together to tilt it
+const touchPts=new Map(); let touchNoTap=false, touchPick=null;
+const _tA=new THREE.Vector3(), _tB=new THREE.Vector3();
+const ndcXY=(x,y)=>{ const r=renderer.domElement.getBoundingClientRect(); return [((x-r.left)/r.width)*2-1, -((y-r.top)/r.height)*2+1]; };
+function dragGround(x0, y0, x1, y1){
+  const a=groundAt(...ndcXY(x0, y0), _tA); if(!a) return; const b=groundAt(...ndcXY(x1, y1), _tB); if(!b) return;
+  target.x=Math.min(700,Math.max(-700,target.x+a.x-b.x)); target.z=Math.min(460,Math.max(-460,target.z+a.z-b.z)); place();
+}
+renderer.domElement.addEventListener('pointerdown', e=>{
+  if(e.pointerType!=='touch' || view!=='world') return;
+  touchPts.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  if(touchPts.size>1){ touchNoTap=true; down=null; }
+});
+renderer.domElement.addEventListener('pointermove', e=>{
+  const p=touchPts.get(e.pointerId); if(!p || view!=='world') return;
+  worldTween=null;
+  const pts=[...touchPts.values()];
+  if(pts.length===1){ if(!down || Math.hypot(e.clientX-down.x, e.clientY-down.y)>8) dragGround(p.x, p.y, e.clientX, e.clientY); p.x=e.clientX; p.y=e.clientY; return; }
+  const [a, b]=pts, other=a===p ? b : a;
+  const px=p.x, py=p.y; p.x=e.clientX; p.y=e.clientY;
+  const d0=Math.hypot(px-other.x, py-other.y), d1=Math.hypot(p.x-other.x, p.y-other.y);
+  // twist: the angle between the fingers
+  let da=Math.atan2(p.y-other.y, p.x-other.x)-Math.atan2(py-other.y, px-other.x);
+  if(da>Math.PI) da-=2*Math.PI; if(da<-Math.PI) da+=2*Math.PI;
+  yaw-=da;
+  // tilt: half of this finger's vertical move (the other finger's move comes in its own event)
+  if(Math.abs(p.y-py)>Math.abs(p.x-px)*1.2 && Math.abs(d1-d0)<4) pitch=Math.min(PITCH_MAX, Math.max(PITCH_MIN, pitch+(p.y-py)*.0035));
+  place();
+  // pinch around the middle of the two fingers, and the middle carries the map along
+  const mx0=(px+other.x)/2, my0=(py+other.y)/2, mx1=(p.x+other.x)/2, my1=(p.y+other.y)/2;
+  dragGround(mx0, my0, mx1, my1);
+  if(d0>20 && d1>20 && Math.abs(d1-d0)>.5) zoom(d0/d1, ...ndcXY(mx1, my1));
+});
+// a tap on the map can open a dialog or panel right under the finger; the browser's click that follows the tap
+// would then press whatever button is there now (choosing an ideology nobody chose): swallow that one click
+let canvasTapAt=null;
+renderer.domElement.addEventListener('pointerup', e=>{ if(e.pointerType==='touch') canvasTapAt={ t:performance.now(), x:e.clientX, y:e.clientY }; });
+document.addEventListener('click', e=>{
+  const c=canvasTapAt; if(!c || e.target===renderer.domElement) return;
+  if(performance.now()-c.t<500 && Math.hypot(e.clientX-c.x, e.clientY-c.y)<30){ e.preventDefault(); e.stopPropagation(); }
+  canvasTapAt=null;
+}, true);
+const touchUp=e=>{ if(!touchPts.delete(e.pointerId)) return; if(!touchPts.size) setTimeout(()=>{ if(!touchPts.size) touchNoTap=false; }, 0); };
+renderer.domElement.addEventListener('pointerup', touchUp); renderer.domElement.addEventListener('pointercancel', touchUp);
+window.addEventListener('pointerup', e=>{ if(e.pointerType==='touch' && e.target!==renderer.domElement) touchUp(e); });
 
 // (the old world-map placement hologram: buildings are placed only in the region view now)
 let ghost=null;
 function clearGhost(){ if(ghost){ worldGroup.remove(ghost); ghost=null; } }
 
 renderer.domElement.addEventListener('pointermove',e=>{
-  if(view!=='world') return;
+  if(view!=='world' || e.pointerType==='touch') return;   // a finger has no hover: it drags the map
   const r=renderer.domElement.getBoundingClientRect();
   ptr.x=((e.clientX-r.left)/r.width)*2-1; ptr.y=-((e.clientY-r.top)/r.height)*2+1;
   // hover highlight: glow the country under the cursor (with a building chosen: shows which region it will open)
@@ -354,8 +409,9 @@ function setHoverCountry(name){
 // big flag + name at the top of the screen while choosing a home country
 const pickPreview=document.getElementById('pickPreview');
 // pointer moved off the map (onto a panel, the header, outside the window): clear the hover
-window.addEventListener('pointermove', e=>{ if(hoverCountry && e.target!==renderer.domElement) setHoverCountry(null); });
-document.addEventListener('pointerleave', ()=>{ if(hoverCountry) setHoverCountry(null); });
+// (a finger "leaves" every time it is lifted: that is no reason to drop the country it just tapped)
+window.addEventListener('pointermove', e=>{ if(e.pointerType!=='touch' && hoverCountry && e.target!==renderer.domElement) setHoverCountry(null); });
+document.addEventListener('pointerleave', e=>{ if(e.pointerType!=='touch' && hoverCountry) setHoverCountry(null); });
 function showPickPreview(name, iso, km2){
   const img=document.getElementById('ppFlag'), globe=document.getElementById('ppGlobe');
   const src = iso ? 'https://flagcdn.com/w320/'+String(iso).toLowerCase()+'.png'
@@ -366,7 +422,7 @@ function showPickPreview(name, iso, km2){
   document.getElementById('ppName').textContent=name;
   const oid=ownerOf[name], taken = oid!==undefined && oid!==playerId && oid!=='player';
   document.getElementById('ppInfo').textContent = km2+' · Savunma: '+baseArmyFor(name).toLocaleString('tr-TR')+' asker';
-  document.getElementById('ppHint').textContent = taken ? 'Bu ülke başka bir oyuncunun' : 'Seçmek için tıkla';
+  document.getElementById('ppHint').textContent = taken ? 'Bu ülke başka bir oyuncunun' : IS_TOUCH ? 'Seçmek için ülkeye tekrar dokun' : 'Seçmek için tıkla';
   const pr=profileOf(name);
   document.getElementById('ppIdent').innerHTML = pr ? '<b>'+pr.title+'</b> · '+pr.strengths.map(k=>GOODS[k].icon+' '+goodLabel(k,S.currentEra)).join(', ')+(pr.weaknesses.length? ' <span class="dn">· zayıf: '+pr.weaknesses.map(k=>goodLabel(k,S.currentEra).toLocaleLowerCase('tr')).join(', ')+'</span>' : '') : '';
   pickPreview.classList.toggle('taken', taken);
@@ -376,7 +432,7 @@ function showPickPreview(name, iso, km2){
 // ---- right-click to delete a building (75% refund) ----
 renderer.domElement.addEventListener('contextmenu',e=>{
   e.preventDefault();
-  if(view!=='world') return;
+  if(view!=='world' || IS_TOUCH) return;
   // if the right button was dragged (rotating the map), don't treat it as a delete click
   if(rdrag && rdrag.moved>8) return;
   const r=renderer.domElement.getBoundingClientRect();
@@ -401,7 +457,7 @@ renderer.domElement.addEventListener('contextmenu',e=>{
 
 function resize(){
   const w=wrap.clientWidth,h=wrap.clientHeight;
-  renderer.setSize(w,h); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(w,h); renderer.setPixelRatio(maxDPR());
   camera.aspect=w/h; camera.updateProjectionMatrix();
   if(regionView) regionView.resize(w,h);
   post.setSize(w,h);
@@ -1000,7 +1056,9 @@ function loop(){
     rateEl.style.color = r<0?'#ff6b6b':'#8be38b'; }
   if(view==='region' && regionView){ if(!cine) applySky(currentSky()); updateCinematic(rdt); regionView.update(rdt); regionView.render(); autoQuality(rdt); updateCompass(); return; }
   if(worldTween){ worldTween.t+=rdt; const k=Math.min(1,worldTween.t/worldTween.dur), e=1-Math.pow(1-k,3);
-    dist=worldTween.from+(worldTween.to-worldTween.from)*e; place(); if(k>=1) worldTween=null; }
+    dist=worldTween.from+(worldTween.to-worldTween.from)*e;
+    if(worldTween.tx!=null){ target.x=worldTween.x0+(worldTween.tx-worldTween.x0)*e; target.z=worldTween.z0+(worldTween.tz-worldTween.z0)*e; }
+    place(); if(k>=1) worldTween=null; }
   let dx=0,dz=0;
   if(keys['w']||keys['arrowup'])dz-=1;
   if(keys['s']||keys['arrowdown'])dz+=1;
@@ -2094,6 +2152,8 @@ function finalizeHome2(pers){
   // bots are authoritative on the host (or in solo); joiners receive them via world sync
   startMatch();
   if(!MP || isHost){ spawnBots(S.match ? 8 : 10); if(MP) hostBroadcastWorld(); }
+  // a phone screen is small: fly over to the home country instead of showing the whole world
+  if(IS_TOUCH){ const c=capitalXZ(name); if(c) worldTween={ from:dist, to:Math.min(dist, 520), t:0, dur:1.1, x0:target.x, z0:target.z, tx:c[0]*worldGroup.scale.x, tz:c[1]*worldGroup.scale.z }; }
 }
 document.getElementById('ideoSoc').onclick=()=>finalizeHome('socialism');
 document.getElementById('ideoCap').onclick=()=>finalizeHome('capitalism');
@@ -3260,7 +3320,7 @@ function startRegionPick(name){
   (meshesByCountry[name]||[]).forEach(m=>{ m.userData._origColor=m.material.color.clone();
     m.material.color.set('#ffd35a'); });
   regionBar.classList.add('show');
-  document.getElementById('regionInfo').textContent=name+': almak istediğin bölgelere tıkla';
+  document.getElementById('regionInfo').textContent=touchText(name+': almak istediğin bölgelere tıkla');
 }
 function endRegionPick(){
   regionMode=false;
@@ -3726,11 +3786,45 @@ function setSpeed(v){
 }
 document.querySelectorAll('#speed button[data-speed]').forEach(b=>{ b.onclick=()=>setSpeed(+b.dataset.speed); });
 
+// ---- phones: landscape, full screen, finger wording ----
+if(IS_TOUCH){
+  // the first tap goes full screen and locks landscape where the browser allows it (Android; iPhone: "Add to Home Screen")
+  const goFull=()=>{
+    const de=document.documentElement, req=de.requestFullscreen || de.webkitRequestFullscreen;
+    if(!document.fullscreenElement && !document.webkitFullscreenElement && req){
+      try{ const r=req.call(de, { navigationUI:'hide' }); if(r && r.then) r.then(lockLand, ()=>{}); else lockLand(); }catch(e){}
+    } else lockLand();
+  };
+  const lockLand=()=>{ try{ const o=screen.orientation; if(o && o.lock) o.lock('landscape').catch(()=>{}); }catch(e){} };
+  let fullTried=false;
+  document.addEventListener('pointerup', e=>{ if(fullTried || location.search.includes('test')) return; fullTried=true; goFull(); }, true);
+  for(const id of ['playSolo','makeTeam','menuJoinBtn','savesMenuBtn']){ const b=document.getElementById(id); if(b && !location.search.includes('test')) b.addEventListener('click', goFull); }
+  // held upright the game waits behind the "turn your phone" card, and goes on when turned back (single player only)
+  const portrait=matchMedia('(orientation: portrait) and (max-width: 820px)');
+  let pausedByTurn=false;
+  const onTurn=()=>{
+    if(portrait.matches){ if(!MP && gameSpeed>0 && document.body.classList.contains('ingame')){ pausedByTurn=gameSpeed; setSpeed(0); } }
+    else if(pausedByTurn){ setSpeed(pausedByTurn); pausedByTurn=false; }
+  };
+  portrait.addEventListener ? portrait.addEventListener('change', onTurn) : portrait.addListener(onTurn);
+  window.addEventListener('resize', onTurn); window.addEventListener('orientationchange', ()=>setTimeout(onTurn, 200));
+  // texts written for a mouse
+  const rhT=document.querySelector('#regionHud .rh-title'); if(rhT) rhT.addEventListener('click', ()=>{ const h=document.getElementById('regionHud'); if(performance.now()-(h._draggedAt||0)>350) h.classList.toggle('folded'); });
+  const rh=document.querySelector('.rh-hint'); if(rh) rh.textContent='Tek parmak: kaydır · İki parmak: yakınlaş ve döndür · Sonuna kadar uzaklaş: dünya haritası';
+  const walk=document.createTreeWalker(wrap, NodeFilter.SHOW_TEXT); for(let n; (n=walk.nextNode());) if(/[tT]ıkla/.test(n.nodeValue)) n.nodeValue=touchText(n.nodeValue);
+}
+function touchText(t){
+  if(!IS_TOUCH || !t) return t;
+  return t.replace(/tıklayıp/g,'dokunup').replace(/tıklayarak/g,'dokunarak').replace(/tıklamalısın/g,'dokunmalısın').replace(/Tıkladığın/g,'Dokunduğun').replace(/Tıkla/g,'Dokun').replace(/tıkla/g,'dokun')
+    .replace(/ \(Esc: iptal\)/g,'');
+}
+
 // every status message written to the (hidden) hint line becomes a toast
 const toastsEl=document.getElementById('toasts');
 let lastToast=null;
 function toast(text){
   if(!text || document.body.classList.contains('selecting')) return;
+  text=touchText(text);
   const kind = /⚠️|Yetersiz|yıkıldı|💀|edemezsin|yok!|kuramaz|alınamadı|isyan/i.test(text) ? 'warn' : /fethedildi|kuruldu|üretildi|katıldı|bastırıldı|kaydedildi/i.test(text) ? 'good' : '';
   // countdowns and repeated messages update the newest toast instead of stacking
   if(lastToast && lastToast.isConnected && performance.now()-lastToast._t<3500 && lastToast.textContent.slice(0,14)===text.slice(0,14)){
@@ -3859,7 +3953,9 @@ function showBotBattle(bot, target, win){
   const el=document.createElement('button'); el.type='button'; el.className='war-alert';
   el.innerHTML='<i>⚔</i><span><b>Savaş!</b> '+bot.name+' → '+target+'</span><small>izle</small>';
   el.title=bot.name+', '+target+' ülkesine saldırdı. Tıkla ve savaşı izle.';
-  el.onclick=e=>{ e.stopPropagation(); watchBotBattle(a); };
+  el.onclick=e=>{ e.stopPropagation();
+    if(IS_TOUCH && !el.classList.contains('open')){ for(const o of warAlertsEl.children) o.classList.remove('open'); el.classList.add('open'); return; }   // phone: tap shows who, tap again watches
+    watchBotBattle(a); };
   warAlertsEl.appendChild(el); a.el=el; botBattles.push(a);
   // a war right next to our lands also gets a toast
   const near=myProvs().some(p=>Math.hypot(p.center[0]-to[0], p.center[1]-to[1])<45);   // a neighbour's war
@@ -4472,7 +4568,13 @@ function regionWhy(type, g){
 }
 const ndcOf=e=>{ const r=renderer.domElement.getBoundingClientRect(); return [((e.clientX-r.left)/r.width)*2-1, -((e.clientY-r.top)/r.height)*2+1]; };
 let regionDown=null;
-renderer.domElement.addEventListener('pointerdown', e=>{ if(view==='region' && e.button===0) regionDown={ x:e.clientX, y:e.clientY }; });
+// (a second finger turns a tap into a pinch: no building, no woodcutting)
+const regionFingers=new Set(); let regionMultiTouch=false;
+renderer.domElement.addEventListener('pointerdown', e=>{
+  if(e.pointerType==='touch'){ regionFingers.add(e.pointerId); if(regionFingers.size>1) regionMultiTouch=true; }
+  if(view==='region' && e.button===0) regionDown={ x:e.clientX, y:e.clientY }; });
+for(const ev of ['pointerup','pointercancel']) window.addEventListener(ev, e=>{ if(e.pointerType!=='touch') return; regionFingers.delete(e.pointerId);
+  if(!regionFingers.size) setTimeout(()=>{ if(!regionFingers.size) regionMultiTouch=false; }, 0); });
 // our building under the cursor in the region view (its record), so clicking it opens what it produces
 function regionBuildingAt(e){
   if(!regionView || !regionView.info || !regionView.info.isPlayer) return null;
@@ -4500,15 +4602,18 @@ renderer.domElement.addEventListener('pointermove', e=>{
   if(view!=='region' || !buildType || !regionView || !regionView.ghost) return;
   regionGhost=regionView.updateGhost(...ndcOf(e), (x,z)=>regionLegal(buildType, x, z));
 });
-let regionGhost=null;
+let regionGhost=null, regionTapAt=null;
 renderer.domElement.addEventListener('pointerup', e=>{
   if(view!=='region' || e.button!==0 || !regionDown) return;
   const moved=Math.hypot(e.clientX-regionDown.x, e.clientY-regionDown.y); regionDown=null;
-  if(moved>6) return;
+  if(moved>(e.pointerType==='touch'? 12 : 6) || regionMultiTouch) return;
   if(!buildType){ const r=regionBuildingAt(e); if(r){ hideWoodPop(); openRegionBuilding(r); return; } offerWood(e); return; }
   if(!regionView.ghost) return;
   const g=regionView.updateGhost(...ndcOf(e), (x,z)=>regionLegal(buildType, x, z)); if(!g) return;
-  if(!g.ok){ hintEl.textContent=regionWhy(buildType, g); return; }   // red preview: nothing gets built
+  if(!g.ok){ regionTapAt=null; hintEl.textContent=regionWhy(buildType, g); return; }   // red preview: nothing gets built
+  if(e.pointerType==='touch' && (!regionTapAt || Math.hypot(g.x-regionTapAt.x, g.z-regionTapAt.z)>3)){
+    regionTapAt={ x:g.x, z:g.z }; hintEl.textContent=b_label(buildType)+' buraya gelecek — kurmak için aynı yere tekrar dokun.'; return; }
+  regionTapAt=null;
   const [wx, wz]=regionToWorld(g.x, g.z), before=placedBuildings.length, type=buildType;
   placeBuilding({ x:wx, z:wz }, { fromRegion:true });
   if(placedBuildings.length>before){ regionView.addBuilding(type, g.x, g.z, g.rot); regionSig=null; }
@@ -4900,6 +5005,8 @@ if (new URLSearchParams(location.search).has('test')) {
 // ---- movable panels: drag a panel by any empty part of it (not its buttons or fields); it stays where it was left,
 // also after closing and reopening it and in later games (per browser)
 const DRAG_PANELS=['tradePanel','diploPanel','rankPanel','provPanel','ctxPanel','battlePanel','eventCard','opBar','buildpanel','taxbar','regionHud'];
+const GRIP='.ctx-head,.tr-head,.bp-head,.ev-head,.rh-title,h3,.ob-row:first-child';
+const PANEL_KEY=id=>'mbr.panel.'+(IS_TOUCH? 'touch.' : '')+id;
 const NO_DRAG='button,input,select,textarea,a,label,summary,[contenteditable],.bopt,.rank-row,#dpInbox,#trOffers,#trGoods';
 function placePanel(el, x, y){
   const w=el.offsetWidth||200, h=el.offsetHeight||60, W=window.innerWidth, H=window.innerHeight;
@@ -4909,10 +5016,11 @@ function placePanel(el, x, y){
 for(const id of DRAG_PANELS){
   const el=document.getElementById(id); if(!el) continue;
   el.classList.add('movable');
-  try{ const p=JSON.parse(localStorage.getItem('mbr.panel.'+id)||'null'); if(p) placePanel(el, p.x, p.y); }catch(e){}
+  try{ const p=JSON.parse(localStorage.getItem(PANEL_KEY(id))||'null'); if(p) placePanel(el, p.x, p.y); }catch(e){}
   let drag=null;
   el.addEventListener('pointerdown', e=>{
     if(e.button!==0 || e.target.closest(NO_DRAG)) return;
+    if(e.pointerType==='touch' && !e.target.closest(GRIP)) return;   // a finger anywhere else scrolls the panel
     // inside a scrolling list, only its scrollbar strip is left alone
     const r=el.getBoundingClientRect(); if(el.scrollHeight>el.clientHeight && e.clientX>r.right-14) return;
     drag={ dx:e.clientX-r.left, dy:e.clientY-r.top, id:e.pointerId, moved:false };
@@ -4920,10 +5028,10 @@ for(const id of DRAG_PANELS){
   });
   el.addEventListener('pointermove', e=>{ if(!drag || e.pointerId!==drag.id) return; drag.moved=true; el.classList.add('dragging'); placePanel(el, e.clientX-drag.dx, e.clientY-drag.dy); });
   const end=e=>{ if(!drag) return; el.classList.remove('dragging');
-    if(drag.moved){ const r=el.getBoundingClientRect(); try{ localStorage.setItem('mbr.panel.'+id, JSON.stringify({ x:r.left, y:r.top })); }catch(err){} }
+    if(drag.moved){ el._draggedAt=performance.now(); const r=el.getBoundingClientRect(); try{ localStorage.setItem(PANEL_KEY(id), JSON.stringify({ x:r.left, y:r.top })); }catch(err){} }
     drag=null; };
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
   // double-click on an empty part: back to its usual place
-  el.addEventListener('dblclick', e=>{ if(e.target.closest(NO_DRAG)) return; for(const k of ['left','top','right','bottom','transform','margin']) el.style[k]=''; try{ localStorage.removeItem('mbr.panel.'+id); }catch(err){} });
+  el.addEventListener('dblclick', e=>{ if(e.target.closest(NO_DRAG)) return; for(const k of ['left','top','right','bottom','transform','margin']) el.style[k]=''; try{ localStorage.removeItem(PANEL_KEY(id)); }catch(err){} });
 }
 window.addEventListener('resize', ()=>{ for(const id of DRAG_PANELS){ const el=document.getElementById(id); if(el && el.style.left) placePanel(el, parseFloat(el.style.left), parseFloat(el.style.top)); } });

@@ -54,6 +54,19 @@ export class RegionView {
     renderer.domElement.addEventListener('wheel', e => {
       if (this.active && e.deltaY > 0 && this.cam.zoom <= REGION_MIN_ZOOM + .02 && this.t > .6) this.onExit && this.onExit();
     });
+    // with fingers: pinching on out when the view is already as far out as it goes does the same
+    const fingers = new Map(); let pinchRef = 0;
+    const el = renderer.domElement, spread = () => { const [p, q] = [...fingers.values()]; return Math.hypot(p[0] - q[0], p[1] - q[1]); };
+    el.addEventListener('pointerdown', e => { if (e.pointerType !== 'touch') return; fingers.set(e.pointerId, [e.clientX, e.clientY]); pinchRef = 0; });
+    el.addEventListener('pointermove', e => {
+      if (!fingers.has(e.pointerId)) return; fingers.set(e.pointerId, [e.clientX, e.clientY]);
+      if (!this.active || fingers.size !== 2 || this.t <= .6) return;
+      const d = spread();
+      if (this.cam.zoom > REGION_MIN_ZOOM + .02 || !pinchRef) { pinchRef = d; return; }
+      if (d < pinchRef * .62) { pinchRef = 0; fingers.clear(); this.onExit && this.onExit(); }
+    });
+    const up = e => { fingers.delete(e.pointerId); pinchRef = 0; };
+    window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
     this.t = 0; this.labels = [];
     this.battleSource = null;   // name -> {prog, lossA, lossD, won, attColor, defColor} while a battle is on
   }

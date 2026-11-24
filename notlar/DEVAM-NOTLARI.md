@@ -196,6 +196,14 @@ Claude Code hafızası proje yoluna göre bir klasörde durur:
 2. Birden çok parçayla çizilmiş devletler (Rus İmparatorluğu iki parça, Prusya beş parça) artık bir kez, bütün parçalarından kuruluyor; illeri ikilenmiyor.
 3. Ters sarılı şekillerin yüzölçümü düzeltildi (Rusya "3 milyar km²" görünüyordu) — `sphereArea`.
 
+**24 Kasım — telefon (yatay):**
+1. **Yatay ekran:** telefon dik tutulunca "Telefonu yan çevir" kartı çıkar ve tek oyunculuda oyun durur; yan çevrilince kaldığı hızla devam eder. İlk dokunuşta tam ekran + yatay kilit (Android; iPhone'da "Ana ekrana ekle" ile tam ekran — `public/manifest.webmanifest`, `apple-mobile-web-app-*` etiketleri).
+2. **Dokunmatik harita:** tek parmak haritayı sürükler (parmağın altındaki yer parmakta kalır), iki parmak sıkıştırınca yakınlaşır (iki parmağın ortasına), döndürünce harita döner, birlikte yukarı/aşağı kaydırınca eğilir. Yön tuşları (pad) ve +/− dokunmatikte gizli. Bölgede iki parmakla tamamen uzaklaşınca dünya haritasına dönülür (`RegionView` içinde).
+3. **Dokunuş kuralları:** ülke seçerken ilk dokunuş ülkeyi gösterir, ikinci dokunuş seçer; bölgede bina yeri ilk dokunuşta önizlenir, aynı yere ikinci dokunuşta kurulur; savaş balonları ilk dokunuşta açılır, ikincide izlenir. Haritaya dokunuşun ardından gelen "hayalet tıklama" yeni açılan pencerenin düğmesine basmasın diye yutuluyor. Uzun basış bina yıkmaz (masaüstündeki sağ tık yıkma telefonda kapalı). Panel taşıma telefonda yalnız başlık satırından; panel yerleri telefon için ayrı saklanır.
+4. **Telefon düzeni (`hud.css` sonunda, `max-height:520px` yatay):** tek satırlık üst çubuk (kaynaklar yana kaydırılır), işlem düğmeleri sağda dikey sütun, paneller ekrandan taşmaz ve kayar, inşa çekmecesi 4 sütun, ideoloji/kişilik seçimi yan yana 3 kart, ana menü ve dönem ekranı kısa ekrana sığar; çentik payları (`safe-area`). Bölge kartı başlığına dokununca katlanır.
+5. **Performans:** dokunmatikte piksel oranı en çok 1.5, grafik "Otomatik" ise Orta'dan başlar. Oyun başlayınca kamera kendi ülkenin üstüne uçar.
+6. Fareye göre yazılmış ipuçları dokunmatikte "dokun" diye yazılır (`touchText`).
+
 ---
 
 ## 7. Test durumu (son çalıştırma)
